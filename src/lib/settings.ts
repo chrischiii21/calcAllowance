@@ -151,7 +151,7 @@ export async function saveAppSettings(userId: string, updated: Partial<AppSettin
         clockify_enabled: updated.clockifyEnabled ?? DEFAULT_SETTINGS.clockifyEnabled,
         is_employee: updated.isEmployee ?? DEFAULT_SETTINGS.isEmployee,
         monthly_rate: updated.monthlyRate ?? DEFAULT_SETTINGS.monthlyRate,
-        employee_start_date: updated.employeeStartDate,
+        employee_start_date: updated.employeeStartDate || null,
         employer_company: updated.employerCompany,
         employee_pay_schedule: updated.employeePaySchedule,
         updated_at: new Date().toISOString()
