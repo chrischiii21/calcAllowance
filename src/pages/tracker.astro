@@ -346,6 +346,26 @@ const formatTo24hr = (timeStr: string) => {
   const parts = timeStr.split(':').map(Number);
   return parts.map(p => String(p).padStart(2, '0')).join(':');
 };
+
+// Entries within a day are displayed latest-first. When two consecutive real time entries (not
+// attendance markers) have a gap between them, surface it as an informational "Break" divider —
+// no categorization (lunch vs BRB etc.), since that depends on the person and isn't tracked.
+const getBreakMinutes = (laterEntry: any, earlierEntry: any): number => {
+  if (!laterEntry || !earlierEntry) return 0;
+  if (laterEntry.type === 'attendance' || earlierEntry.type === 'attendance') return 0;
+  const laterStart = new Date(laterEntry.startFull).getTime();
+  const earlierEnd = new Date(earlierEntry.endFull).getTime();
+  if (isNaN(laterStart) || isNaN(earlierEnd)) return 0;
+  const gapMs = laterStart - earlierEnd;
+  return gapMs > 60000 ? Math.round(gapMs / 60000) : 0;
+};
+
+const formatBreakDuration = (minutes: number): string => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+};
 ---
 
 <Layout>
@@ -516,8 +536,9 @@ const formatTo24hr = (timeStr: string) => {
                                     </div>
                                   </div>
                                   <div class="shift-list">
-                                    {dateGroup.entries.map(entry => (
-                                      entry.type === 'attendance' ? (
+                                    {dateGroup.entries.map((entry, entryIdx) => (
+                                      <>
+                                      {entry.type === 'attendance' ? (
                                         <div class={`shift-item attendance-marker-item ${entry.isActionable ? 'actionable' : 'informational'}`}>
                                           <div class="shift-info">
                                             <div class="shift-title-row">
@@ -586,7 +607,18 @@ const formatTo24hr = (timeStr: string) => {
                                             </div>
                                           </div>
                                         </div>
-                                      )
+                                      )}
+                                      {(() => {
+                                        const gapMin = getBreakMinutes(entry, dateGroup.entries[entryIdx + 1]);
+                                        return gapMin > 0 ? (
+                                          <div class="break-divider">
+                                            <span class="break-divider-line"></span>
+                                            <span class="break-divider-label">Break — {formatBreakDuration(gapMin)}</span>
+                                            <span class="break-divider-line"></span>
+                                          </div>
+                                        ) : null;
+                                      })()}
+                                      </>
                                     ))}
                                   </div>
                                 </div>
@@ -1951,6 +1983,26 @@ const formatTo24hr = (timeStr: string) => {
   }
   .shift-item:hover {
     background: rgba(237, 102, 33, 0.03);
+  }
+  .break-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 20px;
+  }
+  .break-divider-line {
+    flex: 1;
+    height: 1px;
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,0.12) 0, rgba(255,255,255,0.12) 4px, transparent 4px, transparent 8px);
+  }
+  .break-divider-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    opacity: 0.7;
+    white-space: nowrap;
   }
   .shift-title {
     font-size: 14px;

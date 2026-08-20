@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import type { ShiftType } from './shift';
 
 const CLOCKIFY_API_URL = 'https://api.clockify.me/api/v1';
 
@@ -93,7 +94,7 @@ export async function getStudentProgress(userId: string, email: string, startDat
   return Number(manualHours) + clockifyHours;
 }
 
-export async function getDailyDTR(clockifyUserId: string, month: number, year: number, manualEntries: any[] = []) {
+export async function getDailyDTR(clockifyUserId: string, month: number, year: number, manualEntries: any[] = [], shiftType: ShiftType = 'day') {
   const apiKey = import.meta.env.CLOCKIFY_API_KEY;
   const workspaceId = import.meta.env.CLOCKIFY_WORKSPACE_ID;
   const dtr: Record<number, any> = {};
@@ -174,63 +175,104 @@ export async function getDailyDTR(clockifyUserId: string, month: number, year: n
 
     dayLogs.sort((a, b) => a.start.getTime() - b.start.getTime());
 
-    const firstStartH = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' }).format(dayLogs[0].start));
-    
     dtr[d].totalSeconds = dayLogs.reduce((acc, log) => acc + log.duration, 0);
 
-    if (firstStartH >= 12) {
-      dtr[d].pmIn = format12(dayLogs[0].start);
-      const lastLog = dayLogs[dayLogs.length - 1];
-      if (lastLog.start.getTime() !== lastLog.end.getTime()) {
-        dtr[d].pmOut = format12(lastLog.end);
+    if (shiftType === 'day') {
+      // Classic day-shift heuristic: assumes work happens roughly 6am-9pm with a lunch break
+      // somewhere between 10am-3pm. Left untouched for existing day-shift DTRs.
+      const firstStartH = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' }).format(dayLogs[0].start));
+
+      if (firstStartH >= 12) {
+        dtr[d].pmIn = format12(dayLogs[0].start);
+        const lastLog = dayLogs[dayLogs.length - 1];
+        if (lastLog.start.getTime() !== lastLog.end.getTime()) {
+          dtr[d].pmOut = format12(lastLog.end);
+        }
+      } else {
+        let lunchBreakIndex = -1;
+        let maxGap = 0;
+        if (dayLogs.length > 1) {
+          for (let i = 0; i < dayLogs.length - 1; i++) {
+            const end = dayLogs[i].end.getTime();
+            const nextStart = dayLogs[i + 1].start.getTime();
+            const gap = nextStart - end;
+
+            if (gap < 60 * 1000) continue; // Skip overlaps or tiny gaps (< 1 min)
+
+            const endH = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' }).format(dayLogs[i].end));
+
+            // Any gap starting between 10 AM and 3 PM is a candidate for lunch break
+            if (endH >= 10 && endH <= 15) {
+               if (gap >= maxGap) {
+                 maxGap = gap;
+                 lunchBreakIndex = i;
+               }
+            }
+          }
+        }
+
+        if (lunchBreakIndex !== -1) {
+          dtr[d].amIn = format12(dayLogs[0].start);
+          const amOutLog = dayLogs[lunchBreakIndex];
+          if (amOutLog.start.getTime() !== amOutLog.end.getTime()) {
+            dtr[d].amOut = format12(amOutLog.end);
+          }
+
+          dtr[d].pmIn = format12(dayLogs[lunchBreakIndex + 1].start);
+          const pmOutLog = dayLogs[dayLogs.length - 1];
+          if (pmOutLog.start.getTime() !== pmOutLog.end.getTime()) {
+            dtr[d].pmOut = format12(pmOutLog.end);
+          }
+        } else {
+          dtr[d].amIn = format12(dayLogs[0].start);
+          const lastEndLog = dayLogs[dayLogs.length - 1];
+          if (lastEndLog.start.getTime() !== lastEndLog.end.getTime()) {
+            const lastEnd = lastEndLog.end;
+            const lastEndH = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' }).format(lastEnd));
+
+            if (lastEndH >= 13) {
+              dtr[d].pmOut = format12(lastEnd);
+            } else {
+              dtr[d].amOut = format12(lastEnd);
+            }
+          }
+        }
       }
     } else {
-      let lunchBreakIndex = -1;
+      // Mid/night/custom shifts don't have a fixed AM/PM boundary to key off of — instead, find
+      // the single largest gap between consecutive punches (regardless of clock hour) and treat
+      // it as the break, splitting the day into an "in/out" pair before and after it. This works
+      // for shifts that cross midnight too, since grouping is by punch-in day, not literal AM/PM.
+      let breakIndex = -1;
       let maxGap = 0;
       if (dayLogs.length > 1) {
         for (let i = 0; i < dayLogs.length - 1; i++) {
-          const end = dayLogs[i].end.getTime();
-          const nextStart = dayLogs[i + 1].start.getTime();
-          const gap = nextStart - end;
-          
+          const gap = dayLogs[i + 1].start.getTime() - dayLogs[i].end.getTime();
           if (gap < 60 * 1000) continue; // Skip overlaps or tiny gaps (< 1 min)
-
-          const endH = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' }).format(dayLogs[i].end));
-          
-          // Any gap starting between 10 AM and 3 PM is a candidate for lunch break
-          if (endH >= 10 && endH <= 15) {
-             if (gap >= maxGap) {
-               maxGap = gap;
-               lunchBreakIndex = i;
-             }
+          if (gap >= maxGap) {
+            maxGap = gap;
+            breakIndex = i;
           }
         }
       }
 
-      if (lunchBreakIndex !== -1) {
+      if (breakIndex !== -1) {
         dtr[d].amIn = format12(dayLogs[0].start);
-        const amOutLog = dayLogs[lunchBreakIndex];
-        if (amOutLog.start.getTime() !== amOutLog.end.getTime()) {
-          dtr[d].amOut = format12(amOutLog.end);
+        const outLog = dayLogs[breakIndex];
+        if (outLog.start.getTime() !== outLog.end.getTime()) {
+          dtr[d].amOut = format12(outLog.end);
         }
-        
-        dtr[d].pmIn = format12(dayLogs[lunchBreakIndex + 1].start);
-        const pmOutLog = dayLogs[dayLogs.length - 1];
-        if (pmOutLog.start.getTime() !== pmOutLog.end.getTime()) {
-          dtr[d].pmOut = format12(pmOutLog.end);
+
+        dtr[d].pmIn = format12(dayLogs[breakIndex + 1].start);
+        const lastLog = dayLogs[dayLogs.length - 1];
+        if (lastLog.start.getTime() !== lastLog.end.getTime()) {
+          dtr[d].pmOut = format12(lastLog.end);
         }
       } else {
         dtr[d].amIn = format12(dayLogs[0].start);
-        const lastEndLog = dayLogs[dayLogs.length - 1];
-        if (lastEndLog.start.getTime() !== lastEndLog.end.getTime()) {
-          const lastEnd = lastEndLog.end;
-          const lastEndH = parseInt(new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' }).format(lastEnd));
-          
-          if (lastEndH >= 13) {
-            dtr[d].pmOut = format12(lastEnd);
-          } else {
-            dtr[d].amOut = format12(lastEnd);
-          }
+        const lastLog = dayLogs[dayLogs.length - 1];
+        if (lastLog.start.getTime() !== lastLog.end.getTime()) {
+          dtr[d].amOut = format12(lastLog.end);
         }
       }
     }

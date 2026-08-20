@@ -126,6 +126,30 @@ export interface ActiveTimer {
   description: string;
 }
 
+// A zero-duration entries row (start_time === end_time) is what a "punch-in only" DTR grid edit
+// produces (see /api/dtr/save.ts) — a time-in typed directly into the sheet with no matching
+// time-out yet. If today's most recent entry is one of these, the person is effectively "clocked
+// in" even though they never touched the Time In/Out button.
+async function findOpenManualEntryToday(userId: string, isEmployee: boolean) {
+  const todayManila = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+  const startOfDay = new Date(`${todayManila}T00:00:00+08:00`).toISOString();
+  const endOfDay = new Date(`${todayManila}T23:59:59.999+08:00`).toISOString();
+
+  const { data, error } = await supabase
+    .from('entries')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_employee', isEmployee)
+    .gte('start_time', startOfDay)
+    .lte('start_time', endOfDay)
+    .order('start_time', { ascending: false })
+    .limit(1);
+
+  if (error || !data || data.length === 0) return null;
+  const latest = data[0];
+  return latest.duration_seconds === 0 ? latest : null;
+}
+
 export async function getActiveTimer(userId: string, isEmployee: boolean = false): Promise<ActiveTimer | null> {
   try {
     const { data, error } = await supabase
@@ -135,12 +159,41 @@ export async function getActiveTimer(userId: string, isEmployee: boolean = false
       .eq('is_employee', isEmployee)
       .single();
 
-    if (error || !data) return null;
+    if (!error && data) {
+      return {
+        userId: data.user_id,
+        startTime: data.start_time,
+        description: data.description
+      };
+    }
+
+    // No live timer row — check whether a time-in was instead typed straight into the DTR grid.
+    // If so, promote it into a real active_timers row so the Time In/Out button (and everything
+    // else reading this state) sees it as "currently clocked in" and stays in sync no matter which
+    // channel was used to log it.
+    const openEntry = await findOpenManualEntryToday(userId, isEmployee);
+    if (!openEntry) return null;
+
+    await supabase.from('entries').delete().eq('id', openEntry.id);
+
+    const { data: promoted, error: promoteError } = await supabase
+      .from('active_timers')
+      .upsert({
+        user_id: userId,
+        description: openEntry.description || '',
+        start_time: openEntry.start_time,
+        updated_at: new Date().toISOString(),
+        is_employee: isEmployee
+      })
+      .select()
+      .single();
+
+    if (promoteError || !promoted) return null;
 
     return {
-      userId: data.user_id,
-      startTime: data.start_time,
-      description: data.description
+      userId: promoted.user_id,
+      startTime: promoted.start_time,
+      description: promoted.description
     };
   } catch {
     return null;
@@ -167,17 +220,21 @@ export async function startTimer(userId: string, description: string = '', isEmp
 export async function stopTimer(userId: string, description: string, isEmployee: boolean = false) {
   const timer = await getActiveTimer(userId, isEmployee);
   if (!timer) throw new Error('No active timer found');
-  if (!description) throw new Error('Description is required to stop the timer');
+
+  // A plain Time In/Out punch has no task description — falls back to whatever the timer already
+  // carried (e.g. a description promoted from a manual DTR punch-in) or a generic attendance
+  // label, instead of forcing one, since not every stop is "finishing a task."
+  const finalDescription = description || timer.description || 'Present';
 
   const now = new Date();
   const start = new Date(timer.startTime);
   const durationSeconds = Math.floor((now.getTime() - start.getTime()) / 1000);
-  
+
   const { error: logError } = await supabase
     .from('entries')
     .insert({
       user_id: userId,
-      description,
+      description: finalDescription,
       start_time: start.toISOString(),
       end_time: now.toISOString(),
       duration_seconds: Math.max(0, durationSeconds),

@@ -5,7 +5,7 @@ import Sidebar from '../components/Sidebar.astro';
 import { getSession } from '../lib/auth';
 import { parse } from 'cookie';
 import { getAppSettings, DEFAULT_SETTINGS } from '../lib/settings';
-import { getManualEntries, getActiveTimer, startTimer, stopTimer, updateTimerStart } from '../lib/entries';
+import { getManualEntries } from '../lib/entries';
 import { getClockifyUser, getRenderedHours, getStudentProgress } from '../lib/clockify';
 import { formatHMS, formatHours } from '../lib/utils';
 import { groupEntries } from '../lib/grouping';
@@ -27,38 +27,6 @@ const setupStartDate = (!settings.startDate || settings.startDate === DEFAULT_SE
 if (settings.role === 'coordinator') {
   return Astro.redirect('/coordinator');
 }
-
-// POST actions for main timer control on dashboard
-if (Astro.request.method === 'POST') {
-  const formData = await Astro.request.formData();
-  const action = formData.get('action');
-
-  if (action === 'start-timer') {
-    const desc = formData.get('description') as string;
-    await startTimer(user.id, desc, settings.isEmployee);
-    return Astro.redirect('/dashboard?success=Timer started');
-  }
-
-  if (action === 'update-start') {
-    const newStart = formData.get('startTime') as string;
-    await updateTimerStart(user.id, newStart, settings.isEmployee);
-    return Astro.redirect('/dashboard?success=Start time updated');
-  }
-
-  if (action === 'stop-timer') {
-    const desc = formData.get('description') as string;
-    try {
-      await stopTimer(user.id, desc, settings.isEmployee);
-      const { addSyncLog } = await import('../lib/logs');
-      await addSyncLog({ userId: user.id, type: 'Sync', status: 'Success', details: `Timer stopped: ${desc || 'No description'}` });
-      return Astro.redirect('/dashboard?success=Activity log saved');
-    } catch (e) {
-      return Astro.redirect(`/dashboard?error=${encodeURIComponent(e.message)}`);
-    }
-  }
-}
-
-const activeTimer = await getActiveTimer(user.id, settings.isEmployee);
 
 const activeStartDate = settings.isEmployee ? (settings.employeeStartDate || settings.startDate) : settings.startDate;
 const activePaySchedule = settings.isEmployee ? (settings.employeePaySchedule || 'monthly') : settings.paySchedule;
@@ -396,59 +364,6 @@ if (!settings.isEmployee) {
           </div>
         </div>
 
-        <!-- Main Timer Section -->
-        <section class={`main-control ${activeTimer ? 'timer-active' : ''}`} data-start={activeTimer?.startTime}>
-          <form method="POST" class="control-form" id="timer-main-form">
-            <div class="task-input-wrapper">
-              <label class="field-label">CURRENT TASK</label>
-              <input 
-                type="text" 
-                name="description" 
-                placeholder="Enter what you are working on..." 
-                value={activeTimer?.description || ''} 
-                autocomplete="off"
-                class="main-task-input"
-              />
-            </div>
-            
-            <div class="time-display-wrapper">
-              {activeTimer && (
-                <div class="edit-start-box">
-                  <label class="field-label">STARTED AT</label>
-                  <input 
-                    class="inline-time-input time-mask"
-                    maxlength="5"
-                    value={new Date(activeTimer.startTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Manila' })} 
-                    onchange="document.getElementById('action-hidden').value='update-start'; if (typeof this.form.requestSubmit === 'function') { this.form.requestSubmit(); } else { this.form.submit(); }"
-                  />
-                </div>
-              )}
-              
-              <div class="elapsed-box">
-                <label class="field-label">RENDERED TIME</label>
-                <span id="live-timer-val" class="live-digits">00:00:00</span>
-              </div>
-
-              <input type="hidden" name="action" id="action-hidden" value={activeTimer ? "stop-timer" : "start-timer"} />
-              <input type="hidden" name="id" id="id-hidden" />
-
-              <div class="button-box">
-                {activeTimer ? (
-                  <button type="submit" onclick="document.getElementById('action-hidden').value='stop-timer'" class="btn-primary stop">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-                    STOP TASK
-                  </button>
-                ) : (
-                  <button type="submit" onclick="document.getElementById('action-hidden').value='start-timer'" class="btn-primary start">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z"/></svg>
-                    START TIMER
-                  </button>
-                )}
-              </div>
-            </div>
-          </form>
-        </section>
-
         <div class="metrics-grid">
           {settings.isEmployee ? (
             <>
@@ -725,55 +640,19 @@ if (!settings.isEmployee) {
     });
   });
 
-  // Live Timer Setup
-  let timerInterval = null;
-  function initLiveTimer() {
-    if (timerInterval) {
-      clearInterval(timerInterval);
-      timerInterval = null;
-    }
-    const timerSection = document.querySelector('.main-control');
-    const timerVal = document.getElementById('live-timer-val');
-    if (timerSection && timerSection.classList.contains('timer-active')) {
-      const startTime = new Date(timerSection.dataset.start || '').getTime();
-      if (startTime) {
-        const tick = () => {
-          const diff = Math.max(0, new Date().getTime() - startTime);
-          const h = Math.floor(diff / 3600000);
-          const m = Math.floor((diff % 3600000) / 60000);
-          const s = Math.floor((diff % 60000) / 1000);
-          if (timerVal) {
-            timerVal.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-          }
-        };
-        tick();
-        timerInterval = setInterval(tick, 1000);
-      }
-    } else if (timerVal) {
-      timerVal.textContent = "00:00:00";
-    }
-  }
-
-  // Initialize timer on load
-  initLiveTimer();
-
   // Handle visual loading state on form submissions
   document.addEventListener('submit', (e) => {
     const form = e.target;
     if (form.dataset.submitting === 'true') return;
-    
+
     const btn = e.submitter || form.querySelector('button[type="submit"]');
     if (!btn) return;
-    
+
     btn.disabled = true;
     btn.style.opacity = '0.7';
-    
+
     let loadingText = 'Loading...';
-    if (btn.classList.contains('stop')) {
-      loadingText = 'STOPPING TASK...';
-    } else if (btn.classList.contains('start')) {
-      loadingText = 'STARTING TIMER...';
-    } else if (btn.classList.contains('btn-received')) {
+    if (btn.classList.contains('btn-received')) {
       loadingText = 'UPDATING...';
     } else if (btn.classList.contains('btn-save-inline')) {
       loadingText = 'SAVING...';
@@ -1122,55 +1001,6 @@ if (!settings.isEmployee) {
     .setup-header p { font-size: 13px; }
     .toggle-text { font-size: 13px; }
     .check-label-setup input { width: 18px; height: 18px; }
-  }
-
-  /* Main Control Section */
-  .main-control { 
-    background: rgba(13, 20, 33, 0.6); 
-    border: 1px solid var(--border-subtle); 
-    border-radius: 14px; 
-    padding: 24px 28px; 
-    margin-bottom: 32px;
-    backdrop-filter: blur(16px);
-    transition: 0.3s;
-  }
-  .timer-active { border-color: rgba(237, 102, 33, 0.4); background: rgba(237, 102, 33, 0.04); box-shadow: 0 0 32px rgba(237, 102, 33, 0.05); }
-
-  .control-form { display: flex; flex-direction: column; gap: 20px; }
-  .field-label { display: block; font-size: 11px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; font-family: 'Outfit', sans-serif; }
-
-  .main-task-input { 
-    width: 100%; background: transparent; border: none; font-size: 20px; font-weight: 600;
-    color: white; outline: none; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px;
-    font-family: 'Outfit', sans-serif;
-  }
-  .main-task-input:focus { border-bottom-color: var(--ntv-orange); }
-
-  .time-display-wrapper { display: flex; align-items: flex-end; gap: 40px; }
-  .elapsed-box { flex: 1; }
-  .live-digits { font-family: 'JetBrains Mono', monospace; font-size: 32px; font-weight: 700; color: white; line-height: 1; }
-  .timer-active .live-digits { color: var(--ntv-orange); }
-
-  .inline-time-input { 
-    background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); border-radius: 8px;
-    color: var(--ntv-orange); font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600;
-    padding: 6px 10px; cursor: pointer; outline: none;
-  }
-
-  .btn-primary { 
-    display: flex; align-items: center; gap: 10px; padding: 12px 28px; 
-    border: none; border-radius: 10px; font-weight: 800; cursor: pointer; transition: 0.2s;
-    font-size: 13px; letter-spacing: 0.02em;
-  }
-  .btn-primary.start { background: var(--ntv-gradient); color: white; }
-  .btn-primary.stop { background: #ef4444; color: white; }
-  .btn-primary:hover { transform: translateY(-1px); filter: brightness(1.1); }
-
-  @media (max-width: 900px) {
-    .time-display-wrapper { flex-direction: column; align-items: stretch; gap: 24px; }
-    .btn-primary { width: 100%; justify-content: center; }
-    .main-control { padding: 20px; }
-    .live-digits { font-size: 24px; }
   }
 
   /* Onboarding modal styles */

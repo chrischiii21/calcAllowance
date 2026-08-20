@@ -150,3 +150,32 @@ ALTER TABLE public.attendance_holidays ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can manage own attendance overrides" ON public.attendance_overrides FOR ALL USING (true); -- Simplified
 CREATE POLICY "Users can manage own attendance config" ON public.attendance_config FOR ALL USING (true); -- Simplified
 CREATE POLICY "Users can manage own attendance holidays" ON public.attendance_holidays FOR ALL USING (true); -- Simplified
+
+-- ==========================================
+-- SHIFT / WORK SCHEDULE FEATURE
+-- ==========================================
+
+-- 12. SHIFT CONFIG
+-- Purpose: The person's work schedule (day/mid-day/mid-night/night/custom). Shared across
+-- is_employee modes (user_id only), same as attendance_config — a person has one schedule
+-- regardless of tracking mode. Drives how the DTR labels/buckets punch times instead of assuming
+-- a fixed 8-5 AM/PM day shift.
+--   day       — starts morning, ends evening
+--   mid-day   — starts midday, ends at night
+--   mid-night — starts at dawn, ends in the afternoon
+--   night     — starts at night, ends sometime during the day (crosses midnight)
+-- NOTE: if this table was already created before the single 'mid' type was split into
+-- 'mid-day'/'mid-night', run this migration first (defaults any existing 'mid' rows to 'mid-day'):
+--   UPDATE public.shift_config SET shift_type = 'mid-day' WHERE shift_type = 'mid';
+--   ALTER TABLE public.shift_config DROP CONSTRAINT shift_config_shift_type_check;
+--   ALTER TABLE public.shift_config ADD CONSTRAINT shift_config_shift_type_check CHECK (shift_type IN ('day', 'mid-day', 'mid-night', 'night', 'custom'));
+CREATE TABLE IF NOT EXISTS public.shift_config (
+    user_id TEXT PRIMARY KEY,
+    shift_type TEXT NOT NULL DEFAULT 'day' CHECK (shift_type IN ('day', 'mid-day', 'mid-night', 'night', 'custom')),
+    shift_start TIME NOT NULL DEFAULT '08:00',
+    shift_end TIME NOT NULL DEFAULT '17:00',
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE public.shift_config ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage own shift config" ON public.shift_config FOR ALL USING (true); -- Simplified

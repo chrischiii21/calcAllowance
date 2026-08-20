@@ -10,6 +10,7 @@ import { getManualEntries } from "../lib/entries";
 import { supabase } from "../lib/supabase";
 import { getStudentProgress } from "../lib/clockify";
 import { getOverridesForMonth } from "../lib/attendance";
+import { getShiftConfig } from "../lib/shift";
 
 const cookieHeader = Astro.request.headers.get("cookie") || "";
 const cookies = parse(cookieHeader);
@@ -98,12 +99,17 @@ if (isClockifySet && settings.clockifyEnabled !== false) {
   } catch (e) {}
 }
 
-const result = await getDailyDTR(clockifyId, month, year, manualFiltered);
+const shiftConfig = await getShiftConfig(viewUserId);
+const result = await getDailyDTR(clockifyId, month, year, manualFiltered, shiftConfig.shiftType);
 dtrData = result.days.reduce((acc, d) => {
   acc[d.day] = d;
   return acc;
 }, {} as any);
 totalMonthSeconds = result.totalMonthlyHours * 3600;
+
+const isStandardDayShift = shiftConfig.shiftType === 'day';
+const colGroup1Label = isStandardDayShift ? 'AM' : 'SHIFT';
+const colGroup2Label = isStandardDayShift ? 'PM' : 'AFTER BREAK';
 
 // Days marked in the Attendance Chart that have no actual logged time yet. Present/WFH are flagged
 // as needing manual input (you claimed you worked, but there's nothing logged); Absent/SL/VL are
@@ -311,8 +317,8 @@ const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
             <thead>
               <tr>
                 <th rowspan="2">Date</th>
-                <th colspan="2">AM</th>
-                <th colspan="2">PM</th>
+                <th colspan="2">{colGroup1Label}</th>
+                <th colspan="2">{colGroup2Label}</th>
                 <th rowspan="2">Total Hrs</th>
               </tr>
               <tr>

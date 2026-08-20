@@ -24,6 +24,11 @@ const { user } = Astro.props;
     </div>
   </div>
   <div class="header-right">
+    <button type="button" id="clock-toggle-btn" class="clock-toggle-btn" style="display: none;">
+      <span class="clock-toggle-dot"></span>
+      <span id="clock-toggle-label">Time In</span>
+      <span id="clock-toggle-elapsed" class="clock-toggle-elapsed" style="display: none;"></span>
+    </button>
     <div class="user-info">
       <button type="button" id="theme-toggle" class="theme-toggle-btn" title="Toggle Theme" style="outline: none;">
         <!-- Sun icon (shown in light mode) -->
@@ -79,6 +84,26 @@ const { user } = Astro.props;
   .green { background: #34d399; box-shadow: 0 0 7px #34d399; }
   @keyframes pdot { 0%,100%{opacity:1} 50%{opacity:.35} }
 
+  .header-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+
+  .clock-toggle-btn {
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-subtle);
+    color: var(--text-primary); padding: 7px 14px; border-radius: 20px;
+    font-size: 12px; font-weight: 700; cursor: pointer; transition: all .2s;
+  }
+  .clock-toggle-btn:hover { background: rgba(255, 255, 255, 0.09); }
+  .clock-toggle-btn:disabled { opacity: 0.6; cursor: wait; }
+  .clock-toggle-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.35); flex-shrink: 0; }
+  .clock-toggle-btn.on { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.35); color: #4ade80; }
+  .clock-toggle-btn.on .clock-toggle-dot { background: #4ade80; box-shadow: 0 0 6px #4ade80; animation: pdot 2s ease-in-out infinite; }
+  .clock-toggle-elapsed { font-family: 'JetBrains Mono', monospace; font-weight: 500; opacity: 0.85; }
+
+  @media (max-width: 900px) {
+    #clock-toggle-elapsed { display: none !important; }
+    .clock-toggle-btn { padding: 7px 10px; }
+  }
+
   .user-info { display: flex; align-items: center; gap: 10px; }
   .avatar { border-radius: 50%; border: 2px solid var(--ntv-orange); }
   .user-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
@@ -102,6 +127,12 @@ const { user } = Astro.props;
     .logo-secondary, .logo-sep, .user-name { display: none; }
     #sys-header { padding: 0 16px; }
     .header-center { display: none; }
+    .header-right { gap: 8px; }
+  }
+
+  @media (max-width: 420px) {
+    #clock-toggle-label { display: none; }
+    .clock-toggle-btn { padding: 7px 9px; }
   }
 
   /* LOGOUT MODAL STYLES */
@@ -216,4 +247,88 @@ const { user } = Astro.props;
     if (el) el.textContent = `${h}:${m}:${s}`;
   }
   tick(); setInterval(tick, 1000);
+
+  // Global Time In / Time Out widget. Self-contained: fetches its own state so it works on any
+  // page that includes the Header, without every page having to thread timer state through as a prop.
+  (function () {
+    const btn = document.getElementById('clock-toggle-btn');
+    const labelEl = document.getElementById('clock-toggle-label');
+    const elapsedEl = document.getElementById('clock-toggle-elapsed');
+    if (!btn || !labelEl || !elapsedEl) return;
+
+    let elapsedInterval = null;
+    let startTimeMs = null;
+
+    function formatElapsed(ms) {
+      const totalSec = Math.max(0, Math.floor(ms / 1000));
+      const h = String(Math.floor(totalSec / 3600)).padStart(2, '0');
+      const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+      const s = String(totalSec % 60).padStart(2, '0');
+      return `${h}:${m}:${s}`;
+    }
+
+    function stopElapsedTicker() {
+      if (elapsedInterval) {
+        clearInterval(elapsedInterval);
+        elapsedInterval = null;
+      }
+    }
+
+    function startElapsedTicker() {
+      stopElapsedTicker();
+      elapsedInterval = setInterval(() => {
+        if (startTimeMs == null) return;
+        elapsedEl.textContent = formatElapsed(Date.now() - startTimeMs);
+      }, 1000);
+    }
+
+    function render(active, startTime) {
+      btn.style.display = 'flex';
+      btn.classList.toggle('on', active);
+      if (active) {
+        labelEl.textContent = 'Time Out';
+        startTimeMs = startTime ? new Date(startTime).getTime() : Date.now();
+        elapsedEl.style.display = 'inline';
+        elapsedEl.textContent = formatElapsed(Date.now() - startTimeMs);
+        startElapsedTicker();
+      } else {
+        labelEl.textContent = 'Time In';
+        elapsedEl.style.display = 'none';
+        stopElapsedTicker();
+        startTimeMs = null;
+      }
+    }
+
+    async function loadStatus() {
+      try {
+        const res = await fetch('/api/timer/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.applicable) {
+          btn.style.display = 'none';
+          return;
+        }
+        render(data.active, data.startTime);
+      } catch (e) {}
+    }
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/timer/toggle', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to toggle timer');
+        render(data.active, data.startTime);
+        window.showToast?.(data.active ? 'Timed in' : 'Timed out', 'success');
+        // Pages that render timer-dependent server data (e.g. the Dashboard's task timer card)
+        // need a fresh render to stay in sync with this client-only toggle.
+        window.location.reload();
+      } catch (err) {
+        window.showToast?.(err.message || 'Error toggling timer', 'error');
+        btn.disabled = false;
+      }
+    });
+
+    loadStatus();
+  })();
 </script>

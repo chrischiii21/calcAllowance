@@ -6,6 +6,7 @@ import { getSession } from '../lib/auth';
 import { parse } from 'cookie';
 import { getAppSettings } from '../lib/settings';
 import { formatHours } from '../lib/utils';
+import { getShiftConfig, SHIFT_PRESETS } from '../lib/shift';
 
 const cookieHeader = Astro.request.headers.get('cookie') || '';
 const cookies = parse(cookieHeader);
@@ -32,6 +33,7 @@ if (settings.coordinatorId) {
 }
 
 const isLinked = settings.role === 'student' && !!settings.coordinatorId;
+const shiftConfig = settings.role === 'student' ? await getShiftConfig(user.id) : null;
 
 const displayStartDate = settings.isEmployee ? (settings.employeeStartDate || settings.startDate) : settings.startDate;
 const displayHostCompany = settings.isEmployee ? (settings.employerCompany || settings.hostCompany) : settings.hostCompany;
@@ -306,6 +308,83 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
 
                   empToggle?.addEventListener('change', handleToggleChange);
                   if (empToggle) handleToggleChange();
+                </script>
+              </section>
+
+              <section class="settings-card" id="shift-config-card">
+                <h2 class="card-title">Work Shift</h2>
+                <p class="form-hint" style="margin-bottom: 16px;">
+                  Tells the DTR what kind of schedule you work so it can label and split your time
+                  in/out entries correctly, instead of always assuming a standard 8 AM–5 PM day.
+                </p>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="shift-type-select">Shift Type</label>
+                    <select id="shift-type-select" class="settings-select">
+                      <option value="day" selected={shiftConfig?.shiftType === 'day'}>{SHIFT_PRESETS.day.label}</option>
+                      <option value="mid-day" selected={shiftConfig?.shiftType === 'mid-day'}>{SHIFT_PRESETS['mid-day'].label}</option>
+                      <option value="mid-night" selected={shiftConfig?.shiftType === 'mid-night'}>{SHIFT_PRESETS['mid-night'].label}</option>
+                      <option value="night" selected={shiftConfig?.shiftType === 'night'}>{SHIFT_PRESETS.night.label}</option>
+                      <option value="custom" selected={shiftConfig?.shiftType === 'custom'}>Custom</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="form-row split">
+                  <div class="form-group">
+                    <label for="shift-start-input">Shift Start</label>
+                    <input type="time" id="shift-start-input" value={shiftConfig?.shiftStart || '08:00'} />
+                  </div>
+                  <div class="form-group">
+                    <label for="shift-end-input">Shift End</label>
+                    <input type="time" id="shift-end-input" value={shiftConfig?.shiftEnd || '17:00'} />
+                  </div>
+                </div>
+                <p class="form-hint">Picking a shift type just fills in typical start/end times as a starting point — adjust them to match your actual schedule, they're always editable.</p>
+
+                <button type="button" id="shift-config-save-btn" class="save-btn" style="margin-top: 16px;">Save Shift</button>
+
+                <script define:vars={{ presets: SHIFT_PRESETS }}>
+                  const shiftTypeSel = document.getElementById('shift-type-select');
+                  const shiftStartInp = document.getElementById('shift-start-input');
+                  const shiftEndInp = document.getElementById('shift-end-input');
+                  const shiftSaveBtn = document.getElementById('shift-config-save-btn');
+
+                  // Only prefills when the user actively switches the type — never on page load,
+                  // so a saved custom time never gets silently overwritten by the preset default.
+                  shiftTypeSel?.addEventListener('change', () => {
+                    const preset = presets[shiftTypeSel.value];
+                    if (preset) {
+                      shiftStartInp.value = preset.shiftStart;
+                      shiftEndInp.value = preset.shiftEnd;
+                    }
+                  });
+
+                  shiftSaveBtn?.addEventListener('click', async () => {
+                    shiftSaveBtn.disabled = true;
+                    const originalLabel = shiftSaveBtn.textContent;
+                    shiftSaveBtn.textContent = 'Saving...';
+                    try {
+                      const res = await fetch('/api/shift/save-config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          shiftType: shiftTypeSel.value,
+                          shiftStart: shiftStartInp.value,
+                          shiftEnd: shiftEndInp.value,
+                        }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) throw new Error(data.error || 'Failed to save shift');
+                      window.showToast?.('Work shift updated', 'success');
+                    } catch (err) {
+                      window.showToast?.(err.message || 'Error saving shift', 'error');
+                    } finally {
+                      shiftSaveBtn.disabled = false;
+                      shiftSaveBtn.textContent = originalLabel;
+                    }
+                  });
                 </script>
               </section>
 
@@ -899,7 +978,7 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
   .mt-8 { margin-top: 8px; }
   .mt-16 { margin-top: 16px; }
 
-  input[type="date"], input[type="number"], input[type="text"] {
+  input[type="date"], input[type="number"], input[type="text"], input[type="time"] {
     background: rgba(255,255,255,.03); border: 1px solid var(--border-subtle);
     border-radius: 8px; padding: 12px 14px; color: var(--text-primary); font-size: 14px;
   }
