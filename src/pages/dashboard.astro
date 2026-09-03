@@ -765,7 +765,7 @@ if (!settings.isEmployee) {
   .header-main p { color: var(--text-secondary); font-size: 14px; margin-top: 4px; }
   .header-date { text-align: right; }
   .date-label { display: block; font-size: 10px; font-weight: 800; color: var(--ntv-orange); letter-spacing: 0.1em; }
-  .date-value { color: #fff; font-size: 14px; font-weight: 600; }
+  .date-value { color: var(--text-primary); font-size: 14px; font-weight: 600; }
 
   .metrics-grid { 
     display: grid; 
@@ -805,18 +805,18 @@ if (!settings.isEmployee) {
   .company-header-mini { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
   .company-logo-mini { width: 40px; height: 40px; background: var(--ntv-gradient); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: #fff; }
   .company-info-mini { flex: 1; min-width: 0; }
-  .metric-value-mini { font-size: 18px; font-weight: 800; color: #fff; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .metric-value-mini { font-size: 18px; font-weight: 800; color: var(--text-primary); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   
   .company-quick-details { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.06); }
   .quick-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
   .q-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
-  .q-value { font-size: 12px; font-weight: 700; color: #fff; text-align: right; line-height: 1.4; }
+  .q-value { font-size: 12px; font-weight: 700; color: var(--text-primary); text-align: right; line-height: 1.4; }
 
   .metric-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
   .metric-icon.hours { background: rgba(237, 102, 33, 0.1); color: var(--ntv-orange); }
   .metric-icon.remaining { background: rgba(96, 165, 250, 0.1); color: #60a5fa; }
   .metric-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
-  .metric-value { font-size: 24px; font-weight: 700; color: #fff; }
+  .metric-value { font-size: 24px; font-weight: 700; color: var(--text-primary); }
   .metric-subtext { font-size: 11px; color: var(--text-secondary); margin-top: -4px; display: block; }
   .metric-subtext b { color: #60a5fa; font-weight: 600; }
   .unit { font-size: 14px; color: var(--text-secondary); font-weight: 500; }
@@ -835,7 +835,7 @@ if (!settings.isEmployee) {
 
   .total-earnings-summary { text-align: right; }
   .summary-label { display: block; font-size: 10px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; }
-  .summary-value { font-size: 18px; font-weight: 700; color: #fff; }
+  .summary-value { font-size: 18px; font-weight: 700; color: var(--text-primary); }
 
   .earnings-breakdown { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 24px; padding: 24px; }
   .breakdown-list { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
@@ -844,7 +844,7 @@ if (!settings.isEmployee) {
   .breakdown-item:hover { background: rgba(255,255,255,0.05); border-color: rgba(237, 102, 33, 0.2); }
   
   .item-meta { display: flex; align-items: center; gap: 12px; }
-  .item-label { display: block; font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .item-label { display: block; font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
   .item-hours { font-size: 12px; color: var(--text-secondary); }
   
   .carry-tag { font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 6px; text-transform: uppercase; }
@@ -881,7 +881,7 @@ if (!settings.isEmployee) {
   .compact-input-group { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 10px; transition: 0.2s; }
   .compact-input-group:focus-within { background: rgba(237, 102, 33, 0.05); border-color: rgba(237, 102, 33, 0.4); box-shadow: 0 0 12px rgba(237, 102, 33, 0.1); }
   .v-currency { font-size: 14px; font-weight: 800; color: var(--ntv-orange); }
-  .v-amount-input { background: none; border: none; color: #fff; font-size: 16px; font-weight: 800; width: 90px; text-align: right; outline: none; font-family: inherit; }
+  .v-amount-input { background: none; border: none; color: var(--text-primary); font-size: 16px; font-weight: 800; width: 90px; text-align: right; outline: none; font-family: inherit; }
   .v-amount-input::-webkit-inner-spin-button { display: none; }
   
   .btn-save-inline { background: var(--ntv-gradient); border: none; color: #fff; width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; }
@@ -889,7 +889,7 @@ if (!settings.isEmployee) {
   
   .value-group { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
   .v-label { font-size: 9px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
-  .v-amount { font-size: 16px; font-weight: 800; color: #fff; }
+  .v-amount { font-size: 16px; font-weight: 800; color: var(--text-primary); }
   .v-amount.accent { color: #34d399; }
   
   .carry-over-line { padding-left: 24px; position: relative; }
@@ -931,7 +931,7 @@ if (!settings.isEmployee) {
   }
   .role-option:hover .role-content { border-color: rgba(237, 102, 33, 0.3); background: rgba(255,255,255,0.04); transform: translateY(-2px); }
   .role-option input:checked + .role-content { background: rgba(237, 102, 33, 0.08); border-color: var(--ntv-orange); box-shadow: 0 0 20px rgba(237, 102, 33, 0.1); }
-  .role-title { display: block; font-weight: 700; color: #fff; font-size: 16px; }
+  .role-title { display: block; font-weight: 700; color: var(--text-primary); font-size: 16px; }
   .role-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 
   .setup-grid { display: flex; flex-direction: column; gap: 24px; }
@@ -977,7 +977,7 @@ if (!settings.isEmployee) {
     width: 22px; height: 22px; cursor: pointer; accent-color: var(--ntv-orange);
     border-radius: 6px;
   }
-  .toggle-text { font-size: 14px; font-weight: 700; color: #fff; }
+  .toggle-text { font-size: 14px; font-weight: 700; color: var(--text-primary); }
 
   @media (max-width: 768px) {
     .modal-overlay { padding: 0; }
