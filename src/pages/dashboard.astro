@@ -56,6 +56,22 @@ allRawEntries = [
     .map(e => ({ date: e.date, durationSeconds: e.durationSeconds }))
 ];
 
+// Weekly activity chart: hours per day for the last 7 calendar days (zero-filled)
+const dailyHoursMap: Record<string, number> = {};
+allRawEntries.forEach(e => {
+  dailyHoursMap[e.date] = (dailyHoursMap[e.date] || 0) + e.durationSeconds / 3600;
+});
+const weeklyChartData = Array.from({ length: 7 }, (_, i) => {
+  const d = new Date();
+  d.setDate(d.getDate() - (6 - i));
+  const dateStr = d.toISOString().split('T')[0];
+  return {
+    label: d.toLocaleDateString('en-US', { weekday: 'short' }),
+    hours: dailyHoursMap[dateStr] || 0,
+  };
+});
+const maxDailyHours = Math.max(1, ...weeklyChartData.map(d => d.hours));
+
 const grouped = groupEntries(allRawEntries, (settings.hasAllowance || settings.isEmployee) ? activePaySchedule : 'monthly');
 const adjustments = await getPayoutAdjustments(user.id);
 
@@ -129,11 +145,21 @@ if (!settings.isEmployee) {
     }
   }
 
-  finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', { 
-    month: 'short', 
-    day: 'numeric', 
-    year: 'numeric' 
+  finishDateStr = estimatedFinishDate.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
   });
+}
+
+// Pace badge: recent 7-day average vs overall average since start
+let paceStatus = '';
+let recentAvgHours = 0;
+if (!settings.isEmployee) {
+  recentAvgHours = weeklyChartData.reduce((a, b) => a + b.hours, 0) / 7;
+  const daysSinceStart = Math.max(1, Math.ceil((new Date().getTime() - new Date(activeStartDate).getTime()) / 86400000));
+  const overallAvgHours = renderedHours / daysSinceStart;
+  paceStatus = recentAvgHours >= overallAvgHours ? 'ahead' : 'behind';
 }
 ---
 
@@ -429,10 +455,15 @@ if (!settings.isEmployee) {
                       {formatHMS(Math.abs((settings.targetHours * 3600) - (renderedHours * 3600)))}
                     </div>
                     <span class="metric-subtext">
-                      {renderedHours >= settings.targetHours 
-                        ? 'Goal reached! Every hour now is extra credit.' 
+                      {renderedHours >= settings.targetHours
+                        ? 'Goal reached! Every hour now is extra credit.'
                         : `Est. Finish: ${finishDateStr}`}
                     </span>
+                    {renderedHours < settings.targetHours && (
+                      <span class={`pace-badge ${paceStatus}`}>
+                        {paceStatus === 'ahead' ? '↑' : '↓'} {recentAvgHours.toFixed(1)}h/day recent pace
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -476,6 +507,23 @@ if (!settings.isEmployee) {
         </div>
 
         <div class="full-grid">
+          <section class="weekly-chart-card">
+            <div class="section-header">
+              <h2>Weekly <span class="accent">Activity</span></h2>
+              <span class="chart-total">{formatHours(weeklyChartData.reduce((a, b) => a + b.hours, 0))} this week</span>
+            </div>
+            <div class="chart-bars">
+              {weeklyChartData.map(d => (
+                <div class="chart-bar-col" title={`${d.hours.toFixed(1)}h`}>
+                  <div class="chart-bar-track">
+                    <div class="chart-bar-fill" style={`height: ${(d.hours / maxDailyHours) * 100}%`}></div>
+                  </div>
+                  <span class="chart-bar-label">{d.label}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
           <section class="earnings-breakdown">
             <div class="section-header">
               <h2>{(settings.hasAllowance || settings.isEmployee) ? 'Earnings' : 'Hours'} <span class="accent">Breakdown</span></h2>
@@ -827,8 +875,20 @@ if (!settings.isEmployee) {
   .progress-status { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; font-weight: 600; color: var(--text-secondary); }
   .percent-val { color: var(--ntv-orange); font-weight: 800; font-size: 12px; }
 
-  .full-grid { width: 100%; }
-  
+  .full-grid { width: 100%; display: flex; flex-direction: column; gap: 24px; }
+
+  .pace-badge { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 11px; font-weight: 700; width: fit-content; padding: 3px 9px; border-radius: 8px; }
+  .pace-badge.ahead { color: #34d399; background: rgba(52, 211, 153, 0.1); }
+  .pace-badge.behind { color: #f87171; background: rgba(248, 113, 113, 0.1); }
+
+  .weekly-chart-card { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 24px; padding: 24px; }
+  .chart-total { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
+  .chart-bars { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; height: 140px; margin-top: 16px; }
+  .chart-bar-col { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 1; height: 100%; }
+  .chart-bar-track { width: 100%; max-width: 36px; height: 100%; display: flex; align-items: flex-end; background: rgba(255,255,255,0.03); border-radius: 8px; overflow: hidden; }
+  .chart-bar-fill { width: 100%; min-height: 2px; background: var(--ntv-gradient); border-radius: 8px; transition: height 0.6s cubic-bezier(0.16,1,0.3,1); }
+  .chart-bar-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+
   .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
   .section-header h2 { font-size: 18px; font-weight: 600; color: #fff; }
   .pay-tag { font-size: 10px; font-weight: 800; padding: 4px 10px; background: rgba(237, 102, 33, 0.1); color: var(--ntv-orange); border-radius: 20px; }
