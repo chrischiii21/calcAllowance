@@ -24,11 +24,23 @@ const { user } = Astro.props;
     </div>
   </div>
   <div class="header-right">
-    <button type="button" id="clock-toggle-btn" class="clock-toggle-btn" style="display: none;">
-      <span class="clock-toggle-dot"></span>
-      <span id="clock-toggle-label">Time In</span>
-      <span id="clock-toggle-elapsed" class="clock-toggle-elapsed" style="display: none;"></span>
-    </button>
+    <div id="clock-toggle-wrap" class="clock-toggle-wrap" style="display: none;">
+      <button type="button" id="clock-toggle-btn" class="clock-toggle-btn">
+        <span class="clock-toggle-dot"></span>
+        <span id="clock-toggle-label">Time In</span>
+        <span id="clock-toggle-elapsed" class="clock-toggle-elapsed" style="display: none;"></span>
+      </button>
+      <button type="button" id="clock-adjust-btn" class="clock-adjust-btn" style="display: none;" title="Adjust start time">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4L18.5 2.5z"></path></svg>
+      </button>
+      <div id="clock-adjust-popover" class="clock-adjust-popover" style="display: none;">
+        <span class="clock-adjust-label">Started at</span>
+        <input type="time" id="clock-adjust-input" class="clock-adjust-input" />
+        <button type="button" id="clock-adjust-save" class="clock-adjust-save" title="Save">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </button>
+      </div>
+    </div>
     <div class="user-info">
       <button type="button" id="theme-toggle" class="theme-toggle-btn" title="Toggle Theme" style="outline: none;">
         <!-- Sun icon (shown in light mode) -->
@@ -86,6 +98,7 @@ const { user } = Astro.props;
 
   .header-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
 
+  .clock-toggle-wrap { position: relative; display: flex; align-items: center; gap: 6px; }
   .clock-toggle-btn {
     display: flex; align-items: center; gap: 8px;
     background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-subtle);
@@ -98,6 +111,34 @@ const { user } = Astro.props;
   .clock-toggle-btn.on { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.35); color: #4ade80; }
   .clock-toggle-btn.on .clock-toggle-dot { background: #4ade80; box-shadow: 0 0 6px #4ade80; animation: pdot 2s ease-in-out infinite; }
   .clock-toggle-elapsed { font-family: 'JetBrains Mono', monospace; font-weight: 500; opacity: 0.85; }
+
+  .clock-adjust-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-subtle);
+    color: var(--text-secondary); cursor: pointer; transition: all .2s;
+  }
+  .clock-adjust-btn:hover { background: rgba(255, 255, 255, 0.09); color: var(--text-primary); }
+  .clock-adjust-popover {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 200;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--modal-bg); border: 1px solid var(--border-subtle);
+    border-radius: 12px; padding: 8px 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.3);
+  }
+  .clock-adjust-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+  .clock-adjust-input {
+    background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); border-radius: 8px;
+    color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    padding: 4px 6px; outline: none; color-scheme: dark;
+  }
+  :global(.light-mode) .clock-adjust-input { color-scheme: light; }
+  .clock-adjust-save {
+    display: flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0;
+    background: var(--ntv-gradient); border: none; color: #fff; cursor: pointer; transition: 0.2s;
+  }
+  .clock-adjust-save:hover { filter: brightness(1.1); transform: scale(1.05); }
+  .clock-adjust-save:disabled { opacity: 0.6; cursor: wait; }
 
   @media (max-width: 900px) {
     #clock-toggle-elapsed { display: none !important; }
@@ -251,10 +292,15 @@ const { user } = Astro.props;
   // Global Time In / Time Out widget. Self-contained: fetches its own state so it works on any
   // page that includes the Header, without every page having to thread timer state through as a prop.
   (function () {
+    const wrap = document.getElementById('clock-toggle-wrap');
     const btn = document.getElementById('clock-toggle-btn');
     const labelEl = document.getElementById('clock-toggle-label');
     const elapsedEl = document.getElementById('clock-toggle-elapsed');
-    if (!btn || !labelEl || !elapsedEl) return;
+    const adjustBtn = document.getElementById('clock-adjust-btn');
+    const adjustPopover = document.getElementById('clock-adjust-popover');
+    const adjustInput = document.getElementById('clock-adjust-input');
+    const adjustSaveBtn = document.getElementById('clock-adjust-save');
+    if (!wrap || !btn || !labelEl || !elapsedEl) return;
 
     let elapsedInterval = null;
     let startTimeMs = null;
@@ -283,8 +329,9 @@ const { user } = Astro.props;
     }
 
     function render(active, startTime) {
-      btn.style.display = 'flex';
+      wrap.style.display = 'flex';
       btn.classList.toggle('on', active);
+      if (adjustBtn) adjustBtn.style.display = active ? 'flex' : 'none';
       if (active) {
         labelEl.textContent = 'Time Out';
         startTimeMs = startTime ? new Date(startTime).getTime() : Date.now();
@@ -296,8 +343,50 @@ const { user } = Astro.props;
         elapsedEl.style.display = 'none';
         stopElapsedTicker();
         startTimeMs = null;
+        if (adjustPopover) adjustPopover.style.display = 'none';
       }
     }
+
+    // Adjust-start-time popover: lets the user correct the clock-in time without stopping the
+    // timer, so the elapsed counter recalculates from the corrected start instead of restarting.
+    adjustBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (startTimeMs == null || !adjustPopover || !adjustInput) return;
+      const manila = new Date(new Date(startTimeMs).toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+      adjustInput.value = `${String(manila.getHours()).padStart(2, '0')}:${String(manila.getMinutes()).padStart(2, '0')}`;
+      adjustPopover.style.display = adjustPopover.style.display === 'flex' ? 'none' : 'flex';
+    });
+
+    adjustSaveBtn?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const val = adjustInput?.value;
+      if (!val) return;
+      adjustSaveBtn.disabled = true;
+      try {
+        const res = await fetch('/api/timer/status', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ startTime: val }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to adjust start time');
+        startTimeMs = new Date(data.startTime).getTime();
+        elapsedEl.textContent = formatElapsed(Date.now() - startTimeMs);
+        adjustPopover.style.display = 'none';
+        window.showToast?.('Start time updated', 'success');
+      } catch (err) {
+        window.showToast?.(err.message || 'Error updating start time', 'error');
+      } finally {
+        adjustSaveBtn.disabled = false;
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (adjustPopover && adjustPopover.style.display === 'flex' &&
+          !adjustPopover.contains(e.target) && e.target !== adjustBtn) {
+        adjustPopover.style.display = 'none';
+      }
+    });
 
     async function loadStatus() {
       try {

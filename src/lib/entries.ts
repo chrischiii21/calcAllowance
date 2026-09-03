@@ -259,14 +259,17 @@ export async function updateTimerStart(userId: string, startTimeStr: string, isE
   const ensureSeconds = (t: string) => t.split(':').length === 2 ? `${t}:00` : t;
   const fullStart = new Date(`${dateStr}T${ensureSeconds(startTimeStr)}+08:00`);
   
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('active_timers')
     .update({
       start_time: fullStart.toISOString(),
       updated_at: new Date().toISOString()
     })
     .eq('user_id', userId)
-    .eq('is_employee', isEmployee);
+    .eq('is_employee', isEmployee)
+    .select()
+    .single();
 
   if (error) throw error;
+  return data;
 }
