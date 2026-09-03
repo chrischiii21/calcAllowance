@@ -84,15 +84,93 @@ for (let i = 0; i < 3650; i++) {
 
 // Lightweight earnings estimate for the dashboard summary tile (full breakdown lives on /earnings)
 let quickEarnings = 0;
+let quickEarningsPeriods = 0;
+let quickEarningsRate = 0;
 if (settings.hasAllowance || settings.isEmployee) {
   if (settings.isEmployee) {
-    const periodsElapsed = groupEntries(allRawEntries, activePaySchedule).length;
-    const rate = settings.paySchedule === 'semi-monthly' ? (settings.monthlyRate || 0) / 2 : (settings.monthlyRate || 0);
-    quickEarnings = periodsElapsed * rate;
+    quickEarningsPeriods = groupEntries(allRawEntries, activePaySchedule).length;
+    quickEarningsRate = settings.paySchedule === 'semi-monthly' ? (settings.monthlyRate || 0) / 2 : (settings.monthlyRate || 0);
+    quickEarnings = quickEarningsPeriods * quickEarningsRate;
   } else {
     quickEarnings = renderedHours * settings.hourlyRate;
   }
 }
+
+// All-time activity stats: active day count, longest consecutive streak, average pace, this-month total
+const activeDates = Object.keys(dailyHoursMap).filter(d => dailyHoursMap[d] > 0).sort();
+const activeDaysCount = activeDates.length;
+let longestStreak = 0;
+{
+  let run = 0;
+  let prevTime = 0;
+  for (const dateStr of activeDates) {
+    const t = new Date(dateStr).getTime();
+    run = (prevTime && t - prevTime === 86400000) ? run + 1 : 1;
+    longestStreak = Math.max(longestStreak, run);
+    prevTime = t;
+  }
+}
+
+const daysSinceStart = Math.max(1, Math.ceil((new Date().getTime() - new Date(activeStartDate).getTime()) / 86400000));
+const avgHoursPerDayOverall = renderedHours / daysSinceStart;
+
+const currentMonthPrefix = new Date().toISOString().slice(0, 7);
+const hoursThisMonth = Object.entries(dailyHoursMap)
+  .filter(([d]) => d.startsWith(currentMonthPrefix))
+  .reduce((sum, [, h]) => sum + h, 0);
+
+// Cumulative hours trend: one point per calendar day from program start to today.
+// Running total always starts from the true start date; the visible window is capped
+// (ponytail: defensive against a bad/very old start date, not a real-world case).
+const CHART_MAX_DAYS = 730;
+const chartToday = new Date();
+chartToday.setHours(0, 0, 0, 0);
+const chartTrueStart = new Date(activeStartDate);
+chartTrueStart.setHours(0, 0, 0, 0);
+const chartTotalSpanDays = Math.max(1, Math.floor((chartToday.getTime() - chartTrueStart.getTime()) / 86400000) + 1);
+const chartDisplayFromIndex = Math.max(0, chartTotalSpanDays - CHART_MAX_DAYS);
+
+const cumulativeSeries: { date: string; label: string; cumulative: number }[] = [];
+{
+  let running = 0;
+  const cursor = new Date(chartTrueStart);
+  let dayIndex = 0;
+  while (cursor <= chartToday) {
+    const dateStr = cursor.toISOString().split('T')[0];
+    running += dailyHoursMap[dateStr] || 0;
+    if (dayIndex >= chartDisplayFromIndex) {
+      cumulativeSeries.push({
+        date: dateStr,
+        label: cursor.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        cumulative: running,
+      });
+    }
+    cursor.setDate(cursor.getDate() + 1);
+    dayIndex++;
+  }
+}
+
+const CHART_W = 720;
+const CHART_H = 220;
+const CHART_PAD = { top: 16, right: 16, bottom: 26, left: 46 };
+const chartPlotW = CHART_W - CHART_PAD.left - CHART_PAD.right;
+const chartPlotH = CHART_H - CHART_PAD.top - CHART_PAD.bottom;
+
+const hasTargetLine = !settings.isEmployee && settings.targetHours > 0;
+const cumulativeMax = cumulativeSeries.length > 0 ? cumulativeSeries[cumulativeSeries.length - 1].cumulative : 0;
+const chartMaxY = (Math.max(cumulativeMax, hasTargetLine ? settings.targetHours : 0) * 1.1) || 1;
+
+const chartX = (i: number) => cumulativeSeries.length > 1 ? CHART_PAD.left + (i / (cumulativeSeries.length - 1)) * chartPlotW : CHART_PAD.left + chartPlotW / 2;
+const chartY = (v: number) => CHART_PAD.top + (1 - v / chartMaxY) * chartPlotH;
+
+const chartPoints = cumulativeSeries.map((d, i) => ({ x: chartX(i), y: chartY(d.cumulative), date: d.label, cumulative: d.cumulative.toFixed(1) }));
+const linePath = chartPoints.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+const areaPath = chartPoints.length > 0
+  ? `${chartX(0).toFixed(1)},${chartY(0).toFixed(1)} ${linePath} ${chartX(cumulativeSeries.length - 1).toFixed(1)},${chartY(0).toFixed(1)}`
+  : '';
+const chartYTicks = [0, chartMaxY / 2, chartMaxY];
+const chartTargetY = hasTargetLine ? chartY(settings.targetHours) : 0;
+const chartLastPoint = chartPoints[chartPoints.length - 1];
 
 const progressPercent = settings.isEmployee ? 0 : Math.min(100, (renderedHours / (settings.targetHours || 1)) * 100);
 
@@ -137,10 +215,8 @@ if (!settings.isEmployee) {
 let paceStatus = '';
 let recentAvgHours = 0;
 if (!settings.isEmployee) {
-  recentAvgHours = weeklyChartData.reduce((a, b) => a + b.hours, 0) / 7;
-  const daysSinceStart = Math.max(1, Math.ceil((new Date().getTime() - new Date(activeStartDate).getTime()) / 86400000));
-  const overallAvgHours = renderedHours / daysSinceStart;
-  paceStatus = recentAvgHours >= overallAvgHours ? 'ahead' : 'behind';
+  recentAvgHours = totalWeekHours / 7;
+  paceStatus = recentAvgHours >= avgHoursPerDayOverall ? 'ahead' : 'behind';
 }
 ---
 
@@ -382,6 +458,20 @@ if (!settings.isEmployee) {
                     Active session hours logged in your system.
                   </span>
                 </div>
+                <div class="hero-substats">
+                  <div class="hero-substat">
+                    <span class="hero-substat-label">Avg / Day</span>
+                    <span class="hero-substat-value">{avgHoursPerDayOverall.toFixed(1)}h</span>
+                  </div>
+                  <div class="hero-substat">
+                    <span class="hero-substat-label">This Month</span>
+                    <span class="hero-substat-value">{formatHours(hoursThisMonth)}</span>
+                  </div>
+                  <div class="hero-substat">
+                    <span class="hero-substat-label">Active Days</span>
+                    <span class="hero-substat-value">{activeDaysCount}</span>
+                  </div>
+                </div>
               </div>
 
               <div class="metric-card company-summary">
@@ -488,28 +578,69 @@ if (!settings.isEmployee) {
         </div>
 
         <div class="quick-stats">
-          <div class="stat-tile">
-            <span class="stat-label">This Week</span>
-            <span class="stat-value">{formatHours(totalWeekHours)}</span>
-          </div>
-          <div class="stat-tile">
-            <span class="stat-label">Current Streak</span>
-            <span class="stat-value">{currentStreak} {currentStreak === 1 ? 'day' : 'days'}</span>
-          </div>
-          <div class="stat-tile">
-            <span class="stat-label">Total Logs</span>
-            <span class="stat-value">{allRawEntries.length}</span>
-          </div>
+          <details class="stat-tile">
+            <summary>
+              <span class="stat-label">This Week</span>
+              <span class="stat-value">{formatHours(totalWeekHours)}</span>
+            </summary>
+            <p class="stat-explain">
+              Logged on {weeklyChartData.filter(d => d.hours > 0).length} of the last 7 days · averaging {(totalWeekHours / 7).toFixed(1)}h/day this week.
+            </p>
+          </details>
+
+          <details class="stat-tile">
+            <summary>
+              <span class="stat-label">Current Streak</span>
+              <span class="stat-value">{currentStreak} {currentStreak === 1 ? 'day' : 'days'}</span>
+            </summary>
+            <p class="stat-explain">
+              Consecutive days with at least one log, counting back from today. Longest streak on record: {longestStreak} {longestStreak === 1 ? 'day' : 'days'}.
+            </p>
+          </details>
+
+          <details class="stat-tile">
+            <summary>
+              <span class="stat-label">Longest Streak</span>
+              <span class="stat-value">{longestStreak} {longestStreak === 1 ? 'day' : 'days'}</span>
+            </summary>
+            <p class="stat-explain">
+              Longest unbroken run of logged days since you started on {activeStartDate}. You're currently on a {currentStreak}-day streak.
+            </p>
+          </details>
+
+          <details class="stat-tile">
+            <summary>
+              <span class="stat-label">Total Logs</span>
+              <span class="stat-value">{allRawEntries.length}</span>
+            </summary>
+            <p class="stat-explain">
+              {allRawEntries.length} time entries recorded since {activeStartDate}, across {activeDaysCount} active days — combines synced sessions and manual entries.
+            </p>
+          </details>
+
           {(settings.hasAllowance || settings.isEmployee) ? (
-            <a href="/earnings" class="stat-tile stat-tile-link">
-              <span class="stat-label">Expected Earnings</span>
-              <span class="stat-value">₱{quickEarnings.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
-            </a>
+            <details class="stat-tile">
+              <summary>
+                <span class="stat-label">Expected Earnings</span>
+                <span class="stat-value">₱{quickEarnings.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
+              </summary>
+              <p class="stat-explain">
+                {settings.isEmployee
+                  ? `${quickEarningsPeriods} pay period(s) × ₱${quickEarningsRate.toLocaleString()} on your ${activePaySchedule} schedule.`
+                  : `${formatHours(renderedHours)} tracked × ₱${settings.hourlyRate}/hr.`}
+                {' '}<a href="/earnings" class="stat-explain-link">View full breakdown →</a>
+              </p>
+            </details>
           ) : (
-            <div class="stat-tile">
-              <span class="stat-label">Best Day</span>
-              <span class="stat-value">{formatHours(bestDayHours)}</span>
-            </div>
+            <details class="stat-tile">
+              <summary>
+                <span class="stat-label">Best Day</span>
+                <span class="stat-value">{formatHours(bestDayHours)}</span>
+              </summary>
+              <p class="stat-explain">
+                Your single best day out of {activeDaysCount} active day(s) logged so far.
+              </p>
+            </details>
           )}
         </div>
 
@@ -529,6 +660,61 @@ if (!settings.isEmployee) {
                 </div>
               ))}
             </div>
+          </section>
+
+          <section class="progress-chart-card">
+            <div class="section-header">
+              <h2>Progress <span class="accent">Trend</span></h2>
+              <div class="chart-legend">
+                <span class="legend-item"><span class="legend-swatch line"></span>Hours Logged</span>
+                {hasTargetLine && <span class="legend-item"><span class="legend-swatch target"></span>Target</span>}
+              </div>
+            </div>
+
+            {chartPoints.length > 1 ? (
+              <div class="progress-chart-wrap">
+                <svg
+                  id="progress-chart-svg"
+                  class="progress-chart"
+                  viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+                  preserveAspectRatio="none"
+                  data-pad-left={CHART_PAD.left}
+                  data-plot-w={chartPlotW}
+                >
+                  {chartYTicks.map(t => (
+                    <>
+                      <line class="chart-gridline" x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={chartY(t)} y2={chartY(t)} />
+                      <text class="chart-axis-label" x={CHART_PAD.left - 8} y={chartY(t)} text-anchor="end" dominant-baseline="middle">{Math.round(t)}h</text>
+                    </>
+                  ))}
+
+                  {hasTargetLine && (
+                    <line class="chart-target-line" x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={chartTargetY} y2={chartTargetY} />
+                  )}
+
+                  <polygon class="chart-area" points={areaPath} />
+                  <polyline class="chart-line" points={linePath} />
+
+                  {chartLastPoint && <circle class="chart-end-dot" cx={chartLastPoint.x} cy={chartLastPoint.y} r="4.5" />}
+                  {chartLastPoint && (
+                    <text class="chart-end-label" x={chartLastPoint.x} y={chartLastPoint.y - 10} text-anchor="end">{chartLastPoint.cumulative}h</text>
+                  )}
+
+                  <text class="chart-axis-label" x={CHART_PAD.left} y={CHART_H - 6} text-anchor="start">{cumulativeSeries[0].label}</text>
+                  <text class="chart-axis-label" x={CHART_W - CHART_PAD.right} y={CHART_H - 6} text-anchor="end">{cumulativeSeries[cumulativeSeries.length - 1].label}</text>
+
+                  <line id="progress-chart-crosshair" class="chart-crosshair" x1="0" x2="0" y1={CHART_PAD.top} y2={CHART_H - CHART_PAD.bottom} />
+                  <circle id="progress-chart-hover-dot" class="chart-hover-dot" r="5" />
+                </svg>
+                <div id="progress-chart-tooltip" class="chart-tooltip">
+                  <span class="tt-value"></span>
+                  <span class="tt-date"></span>
+                </div>
+              </div>
+              <script type="application/json" id="progress-chart-data" is:inline set:html={JSON.stringify(chartPoints)} />
+            ) : (
+              <p class="chart-empty">Keep logging — your progress trend shows up here after a couple of days.</p>
+            )}
           </section>
         </div>
       </div>
@@ -620,7 +806,7 @@ if (!settings.isEmployee) {
     if (e.target.classList.contains('time-mask')) {
       let val = e.target.value.replace(/\D/g, '');
       if (val.length > 4) val = val.slice(0, 4);
-      
+
       // Auto-colon only for 4 digits as you type
       if (val.length === 4) {
         e.target.value = val.slice(0, 2) + ':' + val.slice(2);
@@ -629,6 +815,65 @@ if (!settings.isEmployee) {
       }
     }
   });
+
+  // Progress Trend chart: crosshair + tooltip on hover/touch
+  (() => {
+    const svg = document.getElementById('progress-chart-svg');
+    const dataEl = document.getElementById('progress-chart-data');
+    if (!svg || !dataEl) return;
+
+    const points = JSON.parse(dataEl.textContent);
+    if (!points.length) return;
+
+    const crosshair = document.getElementById('progress-chart-crosshair');
+    const dot = document.getElementById('progress-chart-hover-dot');
+    const tooltip = document.getElementById('progress-chart-tooltip');
+    const padLeft = parseFloat(svg.dataset.padLeft);
+    const plotW = parseFloat(svg.dataset.plotW);
+
+    function nearestPoint(evt) {
+      const pt = svg.createSVGPoint();
+      pt.x = evt.clientX;
+      pt.y = evt.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return null;
+      const svgPoint = pt.matrixTransform(ctm.inverse());
+      const ratio = Math.min(1, Math.max(0, (svgPoint.x - padLeft) / plotW));
+      const idx = Math.round(ratio * (points.length - 1));
+      return points[idx];
+    }
+
+    function showAt(p) {
+      crosshair.setAttribute('x1', p.x);
+      crosshair.setAttribute('x2', p.x);
+      crosshair.style.opacity = '1';
+      dot.setAttribute('cx', p.x);
+      dot.setAttribute('cy', p.y);
+      dot.style.opacity = '1';
+
+      tooltip.querySelector('.tt-value').textContent = `${p.cumulative}h`;
+      tooltip.querySelector('.tt-date').textContent = p.date;
+      tooltip.style.opacity = '1';
+
+      const rect = svg.getBoundingClientRect();
+      const scale = rect.width / svg.viewBox.baseVal.width;
+      const left = Math.min(rect.width - 100, Math.max(0, p.x * scale - 50));
+      tooltip.style.left = left + 'px';
+      tooltip.style.top = Math.max(0, p.y * scale - 46) + 'px';
+    }
+
+    function hide() {
+      crosshair.style.opacity = '0';
+      dot.style.opacity = '0';
+      tooltip.style.opacity = '0';
+    }
+
+    svg.addEventListener('pointermove', (e) => {
+      const p = nearestPoint(e);
+      if (p) showAt(p);
+    });
+    svg.addEventListener('pointerleave', hide);
+  })();
 
   function formatTimeInput(target) {
     let val = target.value.replace(/\D/g, '');
@@ -768,12 +1013,23 @@ if (!settings.isEmployee) {
   .pace-badge.ahead { color: #34d399; background: rgba(52, 211, 153, 0.1); }
   .pace-badge.behind { color: #f87171; background: rgba(248, 113, 113, 0.1); }
 
-  .quick-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
-  .stat-tile { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; text-decoration: none; transition: all 0.2s; }
-  .stat-tile-link { cursor: pointer; }
-  .stat-tile-link:hover { border-color: rgba(237, 102, 33, 0.3); transform: translateY(-2px); }
+  .hero-substats { display: flex; flex-wrap: wrap; gap: 24px; margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.06); }
+  .hero-substat { display: flex; flex-direction: column; gap: 4px; }
+  .hero-substat-label { font-size: 10px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+  .hero-substat-value { font-size: 16px; font-weight: 800; color: var(--text-primary); }
+
+  .quick-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .stat-tile { position: relative; background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 16px 18px; transition: all 0.2s; }
+  .stat-tile:hover { border-color: rgba(237, 102, 33, 0.3); }
+  .stat-tile summary { display: flex; flex-direction: column; gap: 6px; cursor: pointer; list-style: none; padding-right: 20px; }
+  .stat-tile summary::-webkit-details-marker { display: none; }
+  .stat-tile summary::after { content: '▾'; position: absolute; top: 16px; right: 16px; font-size: 10px; color: var(--text-secondary); transition: transform 0.2s; }
+  .stat-tile[open] summary::after { transform: rotate(180deg); }
   .stat-label { font-size: 10px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
   .stat-value { font-size: 20px; font-weight: 800; color: var(--text-primary); }
+  .stat-explain { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 11px; line-height: 1.6; color: var(--text-secondary); }
+  .stat-explain-link { color: var(--ntv-orange); font-weight: 700; text-decoration: none; }
+  .stat-explain-link:hover { text-decoration: underline; }
 
   .weekly-chart-card { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 24px; padding: 24px; }
   .chart-total { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
@@ -786,9 +1042,35 @@ if (!settings.isEmployee) {
   .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
   .section-header h2 { font-size: 18px; font-weight: 600; color: #fff; }
 
-  @media (max-width: 700px) {
-    .quick-stats { grid-template-columns: repeat(2, 1fr); }
+  .progress-chart-card { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 24px; padding: 24px; }
+  .chart-legend { display: flex; gap: 16px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+  .legend-swatch { width: 14px; height: 2px; border-radius: 2px; }
+  .legend-swatch.line { background: var(--ntv-orange); }
+  .legend-swatch.target { background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 7px); }
+
+  .progress-chart-wrap { position: relative; }
+  .progress-chart { width: 100%; height: 220px; display: block; touch-action: none; }
+  .chart-gridline { stroke: rgba(255,255,255,0.06); stroke-width: 1; }
+  .chart-axis-label { font-size: 10px; fill: var(--text-secondary); font-family: inherit; }
+  .chart-target-line { stroke: #60a5fa; stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.6; }
+  .chart-area { fill: var(--ntv-orange); fill-opacity: 0.08; stroke: none; }
+  .chart-line { fill: none; stroke: var(--ntv-orange); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .chart-end-dot { fill: var(--ntv-orange); stroke: var(--card-bg); stroke-width: 2; }
+  .chart-end-label { font-size: 11px; font-weight: 700; fill: var(--text-primary); font-family: inherit; }
+  .chart-crosshair { stroke: rgba(255,255,255,0.25); stroke-width: 1; opacity: 0; pointer-events: none; }
+  .chart-hover-dot { fill: var(--ntv-orange); stroke: var(--card-bg); stroke-width: 2; opacity: 0; pointer-events: none; }
+
+  .chart-tooltip {
+    position: absolute; top: 0; left: 0; opacity: 0; pointer-events: none;
+    background: var(--modal-bg); border: 1px solid rgba(237, 102, 33, 0.3);
+    border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px;
+    white-space: nowrap; transition: opacity 0.1s; z-index: 10;
   }
+  .chart-tooltip .tt-value { font-size: 13px; font-weight: 800; color: var(--text-primary); }
+  .chart-tooltip .tt-date { font-size: 10px; color: var(--text-secondary); }
+
+  .chart-empty { text-align: center; padding: 32px; color: var(--text-secondary); font-size: 13px; font-style: italic; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px dashed rgba(255,255,255,0.1); }
 
   /* Setup Wizard Styles */
   .modal-overlay { 
