@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /dashboard
+Disallow: /coordinator
+Disallow: /dtr
+Disallow: /tracker
+Disallow: /attendance
+Disallow: /settings
+Disallow: /sync-logs
+Disallow: /sections
+
+Sitemap: https://internship-tracker-self.vercel.app/sitemap.xml

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 // https://astro.build/config
 export default defineConfig({
+  site: 'https://internship-tracker-self.vercel.app',
   output: 'server',
   adapter: vercel({
     webAnalytics: {
