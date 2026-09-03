@@ -515,7 +515,7 @@ if (!settings.isEmployee) {
             <div class="payout-status set">
               <div class="value-group">
                 <span class="v-label">Received</span>
-                <span class="v-amount accent">₱ {item.actualReceived.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span class="v-amount received">₱ {item.actualReceived.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
               <button class="btn-edit-payout" data-label={item.label} data-amount={item.actualReceived.toFixed(2)}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4L18.5 2.5z"></path></svg>
@@ -890,7 +890,7 @@ if (!settings.isEmployee) {
   .value-group { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
   .v-label { font-size: 9px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
   .v-amount { font-size: 16px; font-weight: 800; color: var(--text-primary); }
-  .v-amount.accent { color: #34d399; }
+  .v-amount.received { color: #34d399; }
   
   .carry-over-line { padding-left: 24px; position: relative; }
   .carry-over-line::before { content: ''; position: absolute; left: 10px; top: -8px; bottom: 50%; width: 2px; border-left: 2px dashed rgba(255,255,255,0.1); border-bottom: 2px dashed rgba(255,255,255,0.1); border-bottom-left-radius: 8px; }

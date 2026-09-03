@@ -6,7 +6,7 @@ import { getSession } from "../lib/auth";
 import { parse } from "cookie";
 import { getClockifyUser, getDailyDTR } from "../lib/clockify";
 import { getAppSettings } from "../lib/settings";
-import { getManualEntries } from "../lib/entries";
+import { getManualEntries, getActiveTimer } from "../lib/entries";
 import { supabase } from "../lib/supabase";
 import { getStudentProgress } from "../lib/clockify";
 import { getOverridesForMonth } from "../lib/attendance";
@@ -90,6 +90,21 @@ const manualFiltered = manual.filter((e) => {
   const d = new Date(e.startFull || `${e.date}T${e.startTime}+08:00`);
   return d.getMonth() + 1 === month && d.getFullYear() === year;
 });
+
+// Currently clocked in (Header widget or Dashboard task timer)? Show today's punch-in on the
+// grid right away instead of waiting for Time Out — a zero-duration start===end entry is the
+// same "in, no out yet" shape getDailyDTR already renders for open manual punches.
+const activeTimer = await getActiveTimer(viewUserId, settings.isEmployee ?? false);
+if (activeTimer) {
+  const activeStart = new Date(activeTimer.startTime);
+  if (activeStart.getMonth() + 1 === month && activeStart.getFullYear() === year) {
+    manualFiltered.push({
+      startFull: activeTimer.startTime,
+      endFull: activeTimer.startTime,
+      durationSeconds: 0,
+    } as any);
+  }
+}
 
 let clockifyId = "";
 if (isClockifySet && settings.clockifyEnabled !== false) {
