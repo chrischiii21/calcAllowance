@@ -70,6 +70,20 @@ const weeklyChartData = Array.from({ length: 7 }, (_, i) => {
   };
 });
 const maxDailyHours = Math.max(1, ...weeklyChartData.map(d => d.hours));
+
+// Chart: weekly totals for the current month, so long vs. light weeks are comparable
+const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+const monthWeeksData = Array.from({ length: Math.ceil(daysInMonth / 7) }, (_, i) => ({
+  label: `W${i + 1}`,
+  range: `${i * 7 + 1}–${Math.min(i * 7 + 7, daysInMonth)}`,
+  hours: 0,
+}));
+Object.entries(dailyHoursMap)
+  .filter(([d]) => d.startsWith(new Date().toISOString().slice(0, 7)))
+  .forEach(([d, h]) => {
+    monthWeeksData[Math.floor((Number(d.slice(8, 10)) - 1) / 7)].hours += h;
+  });
+const maxWeekHours = Math.max(1, ...monthWeeksData.map(w => w.hours));
 const totalWeekHours = weeklyChartData.reduce((sum, d) => sum + d.hours, 0);
 const bestDayHours = Math.max(0, ...Object.values(dailyHoursMap));
 
@@ -648,15 +662,15 @@ if (!settings.isEmployee) {
           <section class="weekly-chart-card">
             <div class="section-header">
               <h2>Weekly <span class="accent">Activity</span></h2>
-              <span class="chart-total">{formatHours(weeklyChartData.reduce((a, b) => a + b.hours, 0))} this week</span>
+              <span class="chart-total">{formatHours(hoursThisMonth)} this month</span>
             </div>
             <div class="chart-bars">
-              {weeklyChartData.map(d => (
-                <div class="chart-bar-col" title={`${d.hours.toFixed(1)}h`}>
+              {monthWeeksData.map(w => (
+                <div class="chart-bar-col" title={`${w.range}: ${w.hours.toFixed(1)}h`}>
                   <div class="chart-bar-track">
-                    <div class="chart-bar-fill" style={`height: ${(d.hours / maxDailyHours) * 100}%`}></div>
+                    <div class="chart-bar-fill" style={`height: ${(w.hours / maxWeekHours) * 100}%`}></div>
                   </div>
-                  <span class="chart-bar-label">{d.label}</span>
+                  <span class="chart-bar-label">{w.label}</span>
                 </div>
               ))}
             </div>
