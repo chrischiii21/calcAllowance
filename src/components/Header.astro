@@ -304,6 +304,7 @@ const { user } = Astro.props;
 
     let elapsedInterval = null;
     let startTimeMs = null;
+    const originalTitle = document.title;
 
     function formatElapsed(ms) {
       const totalSec = Math.max(0, Math.floor(ms / 1000));
@@ -318,13 +319,16 @@ const { user } = Astro.props;
         clearInterval(elapsedInterval);
         elapsedInterval = null;
       }
+      document.title = originalTitle;
     }
 
     function startElapsedTicker() {
       stopElapsedTicker();
       elapsedInterval = setInterval(() => {
         if (startTimeMs == null) return;
-        elapsedEl.textContent = formatElapsed(Date.now() - startTimeMs);
+        const formatted = formatElapsed(Date.now() - startTimeMs);
+        elapsedEl.textContent = formatted;
+        document.title = `${formatted} · ${originalTitle}`;
       }, 1000);
     }
 
