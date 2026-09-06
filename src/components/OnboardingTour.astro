@@ -1,0 +1,281 @@
+---
+// Spotlight walkthrough shared by every page. Pages register their own step list via
+// window.InternFlowTour.register(); the Header's "Take a tour" button replays it on demand.
+---
+
+<div id="tour-root" class="tour-root" hidden>
+  <div id="tour-spotlight" class="tour-spotlight"></div>
+
+  <div id="tour-popover" class="tour-popover" role="dialog" aria-modal="true" aria-labelledby="tour-title">
+    <div class="tour-top">
+      <span id="tour-progress" class="tour-progress"></span>
+      <button type="button" id="tour-close" class="tour-close" aria-label="Close tour">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <h4 id="tour-title" class="tour-title"></h4>
+    <p id="tour-body" class="tour-body"></p>
+
+    <div class="tour-actions">
+      <button type="button" id="tour-skip" class="tour-btn tour-btn-ghost">Skip tour</button>
+      <div class="tour-actions-right">
+        <button type="button" id="tour-prev" class="tour-btn tour-btn-secondary">Back</button>
+        <button type="button" id="tour-next" class="tour-btn tour-btn-primary">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .tour-root {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+  }
+  .tour-root[hidden] { display: none; }
+  /* First frame of a tour: jump straight to the target instead of sliding in from the corner. */
+  .tour-root.no-anim .tour-spotlight,
+  .tour-root.no-anim .tour-popover { transition: none; }
+
+  .tour-spotlight {
+    position: fixed;
+    top: 0; left: 0;
+    width: 0; height: 0;
+    border-radius: 14px;
+    border: 2px solid var(--ntv-orange);
+    box-shadow: 0 0 0 9999px rgba(5, 11, 22, 0.78), 0 0 22px rgba(237, 102, 33, 0.5);
+    pointer-events: none;
+    transition: top .32s cubic-bezier(.16,1,.3,1), left .32s cubic-bezier(.16,1,.3,1),
+                width .32s cubic-bezier(.16,1,.3,1), height .32s cubic-bezier(.16,1,.3,1);
+  }
+  :global(html.light-mode) .tour-spotlight {
+    box-shadow: 0 0 0 9999px rgba(18, 24, 38, 0.55), 0 0 22px rgba(237, 102, 33, 0.35);
+  }
+
+  .tour-popover {
+    position: fixed;
+    top: 0; left: 0;
+    width: 320px;
+    /* % of the viewport, not vw: a page that overflows horizontally must not widen the popover. */
+    max-width: calc(100% - 24px);
+    background: var(--modal-bg);
+    border: 1px solid rgba(237, 102, 33, 0.3);
+    border-radius: 16px;
+    padding: 18px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+    transition: top .32s cubic-bezier(.16,1,.3,1), left .32s cubic-bezier(.16,1,.3,1);
+  }
+
+  .tour-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .tour-progress {
+    font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ntv-orange); background: rgba(237, 102, 33, 0.12);
+    padding: 3px 8px; border-radius: 6px;
+  }
+  .tour-close {
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 7px;
+    background: none; border: none; color: var(--text-secondary);
+    cursor: pointer; transition: all .2s;
+  }
+  .tour-close:hover { background: rgba(127, 127, 127, 0.12); color: var(--text-primary); }
+
+  .tour-title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
+  .tour-body { font-size: 13px; line-height: 1.6; color: var(--text-secondary); margin-bottom: 18px; }
+
+  .tour-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .tour-actions-right { display: flex; align-items: center; gap: 8px; }
+  .tour-btn {
+    font-family: inherit; font-size: 12.5px; font-weight: 700;
+    border-radius: 9px; padding: 9px 16px; cursor: pointer; transition: all .2s;
+    border: 1px solid transparent;
+  }
+  .tour-btn-primary { background: var(--ntv-gradient); color: #fff; }
+  .tour-btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+  .tour-btn-secondary {
+    background: rgba(127, 127, 127, 0.1); border-color: var(--border-subtle); color: var(--text-primary);
+  }
+  .tour-btn-secondary:hover { background: rgba(127, 127, 127, 0.18); }
+  .tour-btn-secondary:disabled { opacity: .4; cursor: not-allowed; }
+  .tour-btn-ghost { background: none; color: var(--text-secondary); padding: 9px 4px; }
+  .tour-btn-ghost:hover { color: var(--ntv-orange); }
+
+  @media (max-width: 600px) {
+    .tour-popover { width: calc(100% - 24px); padding: 16px; }
+    .tour-btn { padding: 11px 14px; }
+  }
+
+  @media print {
+    .tour-root { display: none !important; }
+  }
+</style>
+
+<script is:inline>
+  (function () {
+    const SEEN_PREFIX = 'internflow_tour_';
+    const GAP = 14;
+    const PAD = 8;
+
+    const root = document.getElementById('tour-root');
+    const spotlight = document.getElementById('tour-spotlight');
+    const popover = document.getElementById('tour-popover');
+    const titleEl = document.getElementById('tour-title');
+    const bodyEl = document.getElementById('tour-body');
+    const progressEl = document.getElementById('tour-progress');
+    const prevBtn = document.getElementById('tour-prev');
+    const nextBtn = document.getElementById('tour-next');
+    const skipBtn = document.getElementById('tour-skip');
+    const closeBtn = document.getElementById('tour-close');
+    if (!root) return;
+
+    const tour = {
+      tourId: null,
+      registered: [],
+      steps: [],
+      index: 0,
+      active: false,
+
+      register(tourId, steps) {
+        this.tourId = tourId;
+        this.registered = steps || [];
+      },
+
+      hasTour() {
+        return this.registered.length > 0;
+      },
+
+      hasSeen() {
+        try {
+          return localStorage.getItem(SEEN_PREFIX + this.tourId) === 'done';
+        } catch (e) {
+          return false;
+        }
+      },
+
+      markSeen() {
+        try {
+          localStorage.setItem(SEEN_PREFIX + this.tourId, 'done');
+        } catch (e) {}
+      },
+
+      // Steps whose target is missing or hidden (role-specific nav items, widgets that opted out)
+      // are dropped so the walkthrough never spotlights empty space.
+      resolveSteps() {
+        return this.registered.filter((step) => {
+          const el = document.querySelector(step.target);
+          return el && el.getClientRects().length > 0;
+        });
+      },
+
+      start() {
+        if (this.active) return false;
+        this.steps = this.resolveSteps();
+        if (!this.steps.length) return false;
+        this.index = 0;
+        this.active = true;
+        root.hidden = false;
+        root.classList.add('no-anim');
+        this.show();
+        setTimeout(() => root.classList.remove('no-anim'), 120);
+        return true;
+      },
+
+      startIfNew() {
+        if (this.hasSeen()) return false;
+        return this.start();
+      },
+
+      show() {
+        const step = this.steps[this.index];
+        const target = document.querySelector(step.target);
+        if (!target) return this.next();
+
+        titleEl.textContent = step.title;
+        bodyEl.textContent = step.body;
+        progressEl.textContent = `Step ${this.index + 1} of ${this.steps.length}`;
+        prevBtn.disabled = this.index === 0;
+        nextBtn.textContent = this.index === this.steps.length - 1 ? 'Finish' : 'Next';
+
+        // Off-canvas sidebar items are invisible on mobile until the drawer is open.
+        const inSidebar = !!target.closest('#sidebar');
+        document.body.classList.toggle('sidebar-open', inSidebar && window.innerWidth <= 900);
+
+        if (!target.closest('#sys-header') && !inSidebar) {
+          target.scrollIntoView({ block: 'center', inline: 'nearest' });
+        }
+
+        requestAnimationFrame(() => this.position());
+      },
+
+      position() {
+        if (!this.active) return;
+        const step = this.steps[this.index];
+        const target = document.querySelector(step.target);
+        if (!target) return;
+
+        const rect = target.getBoundingClientRect();
+        const top = rect.top - PAD;
+        const left = rect.left - PAD;
+        spotlight.style.top = top + 'px';
+        spotlight.style.left = left + 'px';
+        spotlight.style.width = rect.width + PAD * 2 + 'px';
+        spotlight.style.height = rect.height + PAD * 2 + 'px';
+
+        const pop = popover.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+        let popTop = rect.bottom + GAP;
+        if (popTop + pop.height > vh - 12) {
+          const above = rect.top - GAP - pop.height;
+          popTop = above >= 12 ? above : Math.max(12, vh - pop.height - 12);
+        }
+
+        let popLeft = rect.left + rect.width / 2 - pop.width / 2;
+        popLeft = Math.min(Math.max(12, popLeft), Math.max(12, vw - pop.width - 12));
+
+        popover.style.top = popTop + 'px';
+        popover.style.left = popLeft + 'px';
+      },
+
+      next() {
+        if (this.index >= this.steps.length - 1) return this.end();
+        this.index++;
+        this.show();
+      },
+
+      prev() {
+        if (this.index === 0) return;
+        this.index--;
+        this.show();
+      },
+
+      // Skipping counts as seen too: the tour is replayable from the header, so it should never
+      // re-ambush someone who already dismissed it.
+      end() {
+        this.active = false;
+        root.hidden = true;
+        document.body.classList.remove('sidebar-open');
+        this.markSeen();
+      },
+    };
+
+    nextBtn.addEventListener('click', () => tour.next());
+    prevBtn.addEventListener('click', () => tour.prev());
+    skipBtn.addEventListener('click', () => tour.end());
+    closeBtn.addEventListener('click', () => tour.end());
+
+    document.addEventListener('keydown', (e) => {
+      if (!tour.active) return;
+      if (e.key === 'Escape') tour.end();
+      if (e.key === 'ArrowRight') tour.next();
+      if (e.key === 'ArrowLeft') tour.prev();
+    });
+
+    window.addEventListener('resize', () => tour.position());
+    window.addEventListener('scroll', () => tour.position(), true);
+
+    window.InternFlowTour = tour;
+  })();
+</script>

@@ -1,5 +1,6 @@
 ---
 import Toaster from "../components/Toaster.astro";
+import OnboardingTour from "../components/OnboardingTour.astro";
 
 interface Props {
   title?: string;
@@ -23,7 +24,7 @@ const ogImageURL = new URL("/logo.png", Astro.site);
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="icon" type="image/png" href="/logo-64.png" />
     <meta name="generator" content={Astro.generator} />
     <meta name="description" content={description} />
     <meta name="robots" content={noindex ? "noindex, nofollow" : "index, follow"} />
@@ -71,6 +72,7 @@ const ogImageURL = new URL("/logo.png", Astro.site);
 
     <slot />
     <Toaster />
+    <OnboardingTour />
 
     <script is:inline>
       document

@@ -8,7 +8,7 @@ const { user } = Astro.props;
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
     <div class="logo-mark">
-      <img src="/logo.png" alt="Logo" width="32" height="32" />
+      <img src="/logo-64.png" alt="Logo" width="32" height="32" />
     </div>
     <div class="logo-text">
       <span class="logo-primary">InternFlow</span>
@@ -24,6 +24,11 @@ const { user } = Astro.props;
     </div>
   </div>
   <div class="header-right">
+    <a id="sync-source-badge" class="sync-badge" href="/settings" data-tour="sync-source" style="display: none;">
+      <svg class="sync-icon icon-cloud" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .5-8.97A6 6 0 0 0 6.2 9.2 4.4 4.4 0 0 0 7 18h1"/><path d="M12 12v9"/><path d="m9 18 3 3 3-3"/></svg>
+      <svg class="sync-icon icon-timer" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/></svg>
+      <span id="sync-badge-label" class="sync-badge-label">Internal Timer</span>
+    </a>
     <div id="clock-toggle-wrap" class="clock-toggle-wrap" style="display: none;">
       <button type="button" id="clock-toggle-btn" class="clock-toggle-btn">
         <span class="clock-toggle-dot"></span>
@@ -42,6 +47,9 @@ const { user } = Astro.props;
       </div>
     </div>
     <div class="user-info">
+      <button type="button" id="tour-trigger" class="theme-toggle-btn" title="Take a tour of this app" aria-label="Take a tour of this app" data-tour="tour-button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </button>
       <button type="button" id="theme-toggle" class="theme-toggle-btn" title="Toggle Theme" style="outline: none;">
         <!-- Sun icon (shown in light mode) -->
         <svg id="theme-sun-icon" class="theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -98,6 +106,22 @@ const { user } = Astro.props;
 
   .header-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
 
+  /* Tells the user at a glance where their hours are coming from, so the DTR total is never a mystery. */
+  .sync-badge {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+    padding: 5px 10px; border-radius: 20px; text-decoration: none;
+    font-size: 11px; font-weight: 700; letter-spacing: .02em;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-subtle);
+    color: var(--text-secondary); transition: all .2s;
+  }
+  .sync-badge:hover { filter: brightness(1.15); }
+  .sync-badge .sync-icon { flex-shrink: 0; }
+  .sync-badge .icon-cloud { display: none; }
+  .sync-badge.synced { background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.32); color: #34d399; }
+  .sync-badge.synced .icon-cloud { display: block; }
+  .sync-badge.synced .icon-timer { display: none; }
+  .sync-badge.internal { background: rgba(237, 102, 33, 0.1); border-color: rgba(237, 102, 33, 0.3); color: var(--ntv-orange); }
+
   .clock-toggle-wrap { position: relative; display: flex; align-items: center; gap: 6px; }
   .clock-toggle-btn {
     display: flex; align-items: center; gap: 8px;
@@ -143,6 +167,8 @@ const { user } = Astro.props;
   @media (max-width: 900px) {
     #clock-toggle-elapsed { display: none !important; }
     .clock-toggle-btn { padding: 7px 10px; }
+    .sync-badge-label { display: none; }
+    .sync-badge { padding: 6px; }
   }
 
   .user-info { display: flex; align-items: center; gap: 10px; }
@@ -174,6 +200,9 @@ const { user } = Astro.props;
   @media (max-width: 420px) {
     #clock-toggle-label { display: none; }
     .clock-toggle-btn { padding: 7px 9px; }
+    .header-right { gap: 6px; }
+    .user-info { gap: 6px; }
+    .theme-toggle-btn, .logout-btn { width: 28px; height: 28px; margin-right: 0; }
   }
 
   /* LOGOUT MODAL STYLES */
@@ -258,6 +287,17 @@ const { user } = Astro.props;
   // Mobile Menu Logic
   document.getElementById('mobile-menu-toggle')?.addEventListener('click', () => {
     document.body.classList.toggle('sidebar-open');
+  });
+
+  // "Take a tour" — replays the walkthrough registered by the current page. Pages without their
+  // own tour hand the user to the Dashboard one, which covers the app as a whole.
+  document.getElementById('tour-trigger')?.addEventListener('click', () => {
+    const tour = window.InternFlowTour;
+    if (tour && tour.hasTour()) {
+      tour.start();
+    } else {
+      window.location.href = '/dashboard?tour=1';
+    }
   });
 
   // Logout Modal Logic
@@ -392,6 +432,25 @@ const { user } = Astro.props;
       }
     });
 
+    // Which source feeds the hours totals and the DTR: Clockify sessions synced in, or only the
+    // built-in timer plus manual entries. Ambiguity here is what makes DTR totals confusing.
+    function renderSyncSource(data) {
+      const badge = document.getElementById('sync-source-badge');
+      const label = document.getElementById('sync-badge-label');
+      if (!badge || !label) return;
+
+      const synced = data.source === 'clockify';
+      badge.style.display = 'flex';
+      badge.classList.toggle('synced', synced);
+      badge.classList.toggle('internal', !synced);
+      label.textContent = synced ? 'Clockify Synced' : 'Internal Timer';
+      badge.title = synced
+        ? 'Clockify sync is ON — sessions tracked in Clockify flow into your hours and DTR automatically. Time In/Out here uses the built-in timer, and both sources are combined.'
+        : data.clockifyEnabled
+          ? 'Your email is not linked to a Clockify account — hours come from the built-in Time In/Out timer and manual entries only. Tap to manage the integration.'
+          : 'Clockify sync is OFF — hours come from the built-in Time In/Out timer and manual entries only. Tap to turn sync back on.';
+    }
+
     async function loadStatus() {
       try {
         const res = await fetch('/api/timer/status');
@@ -401,12 +460,17 @@ const { user } = Astro.props;
           btn.style.display = 'none';
           return;
         }
+        renderSyncSource(data);
         render(data.active, data.startTime);
       } catch (e) {}
     }
 
     btn.addEventListener('click', async () => {
       btn.disabled = true;
+      // The request is followed by a full page reload, so cover both with the global overlay —
+      // otherwise the punch looks like it did nothing until the page happens to come back.
+      const wasActive = btn.classList.contains('on');
+      window.showLoadingSpinner?.(wasActive ? 'TIMING OUT...' : 'TIMING IN...');
       try {
         const res = await fetch('/api/timer/toggle', { method: 'POST' });
         const data = await res.json();
@@ -417,6 +481,7 @@ const { user } = Astro.props;
         // need a fresh render to stay in sync with this client-only toggle.
         window.location.reload();
       } catch (err) {
+        window.hideLoadingSpinner?.();
         window.showToast?.(err.message || 'Error toggling timer', 'error');
         btn.disabled = false;
       }

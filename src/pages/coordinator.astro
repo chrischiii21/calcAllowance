@@ -260,8 +260,50 @@ if (selectedStatus === 'completed') {
   const hasSeenOnboarding = localStorage.getItem('has_seen_onboarding_coordinator');
   const worksModal = document.getElementById('how-it-works-modal');
   
-  if (isFirstLogin && !hasSeenOnboarding) {
-    if (worksModal) worksModal.style.display = 'flex';
+  const showedIntroModal = isFirstLogin && !hasSeenOnboarding;
+  if (showedIntroModal && worksModal) {
+    worksModal.style.display = 'flex';
+  }
+
+  // Guided walkthrough, replayable from the header's tour button.
+  window.InternFlowTour?.register('coordinator', [
+    {
+      target: '.stats-overview',
+      title: 'Your roster at a glance',
+      body: 'How many interns you supervise, how many have completed their required hours, and how many are still in progress.',
+    },
+    {
+      target: '.student-section',
+      title: 'Student roster',
+      body: 'Every linked intern with their hours, progress and agency. Filter by section, agency or status, and open any student’s DTR from here.',
+    },
+    {
+      target: '[data-tour="nav-sections"]',
+      title: 'Manage Sections',
+      body: 'Create sections and share their invite codes — a student who enters your code in Settings shows up on this roster automatically.',
+    },
+    {
+      target: '[data-tour="nav-dtr"]',
+      title: 'Student DTRs',
+      body: 'Open any intern’s Daily Time Record, month by month, and correct entries before you endorse them.',
+    },
+    {
+      target: '[data-tour="nav-attendance"]',
+      title: 'Attendance Chart',
+      body: 'The per-day attendance calendar for the student you are viewing — present, WFH, absent, sick and vacation days.',
+    },
+    {
+      target: '[data-tour="tour-button"]',
+      title: 'Replay this tour any time',
+      body: 'This button reopens the walkthrough whenever you need it.',
+    },
+  ]);
+
+  function startTour(force) {
+    setTimeout(() => {
+      if (force) window.InternFlowTour?.start();
+      else window.InternFlowTour?.startIfNew();
+    }, 700);
   }
 
   // Bind close buttons to dismiss and mark as seen
@@ -269,10 +311,17 @@ if (selectedStatus === 'completed') {
   closeBtn?.addEventListener('click', () => {
     localStorage.setItem('has_seen_onboarding_coordinator', 'true');
     worksModal.style.display = 'none';
+    startTour(false);
   });
 
+  if (params.get('tour') === '1') {
+    startTour(true);
+  } else if (!showedIntroModal) {
+    startTour(false);
+  }
+
   // Clear query parameters
-  if (isFirstLogin) {
+  if (isFirstLogin || params.get('tour')) {
     const newUrl = window.location.pathname;
     window.history.replaceState({}, '', newUrl);
   }

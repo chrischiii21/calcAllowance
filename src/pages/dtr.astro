@@ -159,6 +159,16 @@ const needsUpdate = settings.isEmployee
      (settings.supervisor?.includes("Enter") ?? true));
 
 const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
+
+// Spelling out where the numbers below came from — synced Clockify sessions, the built-in timer,
+// or both — so a total that looks short has an obvious explanation.
+const syncSource = clockifyId
+  ? "clockify"
+  : settings.clockifyEnabled === false
+    ? "disabled"
+    : "unlinked";
+
+const totalRequiredHours = settings.isEmployee ? 0 : settings.targetHours;
 ---
 
 <Layout title="DTR Sheet">
@@ -282,7 +292,37 @@ const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
             </svg>
             Download PDF
           </button>
+          {!settings.isEmployee && (
+            <button id="school-form-btn" class="school-form-btn" data-tour="school-form">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" />
+              </svg>
+              School Form PDF
+            </button>
+          )}
         </div>
+      </div>
+
+      <div class={`no-print dtr-source-banner source-${syncSource}`} data-tour="dtr-source">
+        <span class="source-dot"></span>
+        <div class="source-text">
+          {syncSource === "clockify" ? (
+            <>
+              <strong>Clockify Synced.</strong> This sheet combines your synced Clockify sessions with the built-in Time In/Out timer and any manual entries.
+            </>
+          ) : syncSource === "disabled" ? (
+            <>
+              <strong>Built-in timer only.</strong> Clockify sync is turned off, so these totals come from the Time In/Out timer and your manual entries.
+            </>
+          ) : (
+            <>
+              <strong>Built-in timer only.</strong> This email isn't linked to a Clockify account, so these totals come from the Time In/Out timer and your manual entries.
+            </>
+          )}
+        </div>
+        {syncSource !== "clockify" && mySettings.role !== "coordinator" && (
+          <a href="/settings" class="source-link">Manage sync</a>
+        )}
       </div>
 
       <div class="dtr-scroll-wrapper content-center">
@@ -473,6 +513,131 @@ const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
           </footer>
         </div>
       </div>
+
+      {!settings.isEmployee && (
+        <>
+          <div id="school-form-modal" class="modal-overlay no-print">
+            <div class="modal-content">
+              <h2 class="modal-title">Official School DTR Form</h2>
+              <p class="modal-desc">
+                These are the details schools print on their own practicum form. They're saved on this
+                device, so you only fill them in once.
+              </p>
+
+              <div class="sf-grid">
+                <label class="sf-field">
+                  <span>School / University</span>
+                  <input id="sf-school" type="text" placeholder="e.g. Bicol University" />
+                </label>
+                <label class="sf-field">
+                  <span>College / Department</span>
+                  <input id="sf-college" type="text" placeholder="e.g. College of Science" />
+                </label>
+                <label class="sf-field">
+                  <span>Course &amp; Section</span>
+                  <input id="sf-section" type="text" placeholder="e.g. BSIT 4-A" value={settings.program || ""} />
+                </label>
+                <label class="sf-field">
+                  <span>School Year / Term</span>
+                  <input id="sf-term" type="text" placeholder="e.g. A.Y. 2025–2026, 2nd Sem" />
+                </label>
+                <label class="sf-field">
+                  <span>Practicum Adviser / Coordinator</span>
+                  <input id="sf-adviser" type="text" placeholder="Full name" />
+                </label>
+                <label class="sf-field">
+                  <span>Required Hours</span>
+                  <input id="sf-required" type="number" min="0" value={totalRequiredHours} />
+                </label>
+              </div>
+
+              <div class="modal-actions-row">
+                <button type="button" id="sf-cancel" class="btn-cancel">Cancel</button>
+                <button type="button" id="sf-generate" class="download-btn">Generate PDF</button>
+              </div>
+            </div>
+          </div>
+
+          <div
+            id="official-form"
+            class="official-form"
+            aria-hidden="true"
+            data-student={settings.userName || ""}
+            data-company={settings.hostCompany || ""}
+            data-supervisor={settings.supervisor || ""}
+            data-supervisor-position={settings.supervisorPosition || ""}
+            data-period={`${monthName} ${year}`}
+            data-filename={`Official_DTR_${(settings.userName || "Student").replace(/\s+/g, "_")}_${monthName}_${year}.pdf`}
+          >
+            <div class="of-head">
+              <div class="of-school" id="of-school"></div>
+              <div class="of-college" id="of-college"></div>
+              <div class="of-doc-title">DAILY TIME RECORD</div>
+              <div class="of-doc-sub">On-the-Job Training / Practicum</div>
+            </div>
+
+            <div class="of-info">
+              <div class="of-info-row"><span class="of-lbl">Name of Student:</span><span class="of-val" id="of-student"></span></div>
+              <div class="of-info-row"><span class="of-lbl">Course &amp; Section:</span><span class="of-val" id="of-section"></span></div>
+              <div class="of-info-row"><span class="of-lbl">Cooperating Agency:</span><span class="of-val" id="of-company"></span></div>
+              <div class="of-info-row"><span class="of-lbl">School Year / Term:</span><span class="of-val" id="of-term"></span></div>
+              <div class="of-info-row"><span class="of-lbl">Immediate Supervisor:</span><span class="of-val" id="of-supervisor"></span></div>
+              <div class="of-info-row"><span class="of-lbl">Covered Period:</span><span class="of-val" id="of-period"></span></div>
+            </div>
+
+            <table class="of-table">
+              <thead>
+                <tr>
+                  <th rowspan="2" class="of-col-day">Date</th>
+                  <th colspan="2">Morning</th>
+                  <th colspan="2">Afternoon</th>
+                  <th rowspan="2" class="of-col-total">Total Hours</th>
+                </tr>
+                <tr>
+                  <th>Time In</th>
+                  <th>Time Out</th>
+                  <th>Time In</th>
+                  <th>Time Out</th>
+                </tr>
+              </thead>
+              <tbody id="of-tbody"></tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="5" class="of-total-label">TOTAL HOURS RENDERED THIS PERIOD</td>
+                  <td class="of-total-val" id="of-period-total"></td>
+                </tr>
+                <tr>
+                  <td colspan="5" class="of-total-label">TOTAL HOURS REQUIRED</td>
+                  <td class="of-total-val" id="of-required"></td>
+                </tr>
+              </tfoot>
+            </table>
+
+            <div class="of-cert">
+              I hereby certify that the entries above are true and correct records of the hours I rendered.
+            </div>
+
+            <div class="of-sign-row">
+              <div class="of-sign">
+                <div class="of-sign-line"></div>
+                <div class="of-sign-label">Signature of Student</div>
+              </div>
+              <div class="of-sign">
+                <div class="of-sign-line of-sign-name" id="of-supervisor-name"></div>
+                <div class="of-sign-label">Signature over Printed Name of Supervisor</div>
+                <div class="of-sign-sub" id="of-supervisor-position"></div>
+              </div>
+            </div>
+
+            <div class="of-sign-row of-sign-row-single">
+              <div class="of-sign">
+                <div class="of-sign-line of-sign-name" id="of-adviser"></div>
+                <div class="of-sign-label">Noted by: Practicum Adviser / Coordinator</div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </main>
   </div>
 </Layout>
@@ -555,6 +720,172 @@ const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
       }
     }
   });
+
+  // Official School Form export: the same month's punches re-laid out on the formal, black-and-white
+  // sheet schools actually collect, with the school-specific details students fill in once.
+  const schoolFormBtn = document.getElementById("school-form-btn");
+  const schoolModal = document.getElementById("school-form-modal");
+  const officialForm = document.getElementById("official-form");
+  const SCHOOL_FORM_STORE = "internflow_school_form";
+
+  const sfFields = {
+    school: document.getElementById("sf-school"),
+    college: document.getElementById("sf-college"),
+    section: document.getElementById("sf-section"),
+    term: document.getElementById("sf-term"),
+    adviser: document.getElementById("sf-adviser"),
+    required: document.getElementById("sf-required"),
+  };
+
+  const setText = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value || "";
+  };
+
+  function cellValue(row, col, fallbackIndex) {
+    const input = row.querySelector(`input[data-col="${col}"]`);
+    if (input) return input.value.trim();
+    const cells = row.querySelectorAll("td");
+    return cells[fallbackIndex] ? cells[fallbackIndex].textContent.trim() : "";
+  }
+
+  function rowTotal(row) {
+    const cell = row.querySelector(".row-total");
+    if (!cell) return "";
+    // "No log — input needed" style hints live in a span; they aren't a duration.
+    return cell.querySelector("span") ? "" : cell.textContent.trim();
+  }
+
+  function buildOfficialForm() {
+    const tbody = document.getElementById("of-tbody");
+    if (!tbody || !officialForm) return;
+    tbody.replaceChildren();
+
+    document.querySelectorAll("#dtr-sheet tbody tr").forEach((row) => {
+      const values = [
+        row.getAttribute("data-day") || "",
+        cellValue(row, "amIn", 1),
+        cellValue(row, "amOut", 2),
+        cellValue(row, "pmIn", 3),
+        cellValue(row, "pmOut", 4),
+        rowTotal(row),
+      ];
+      const tr = document.createElement("tr");
+      if (!values[5]) tr.className = "of-row-nolog";
+      values.forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+
+    const data = officialForm.dataset;
+    setText("of-school", sfFields.school?.value.trim());
+    setText("of-college", sfFields.college?.value.trim());
+    setText("of-section", sfFields.section?.value.trim());
+    setText("of-term", sfFields.term?.value.trim());
+    setText("of-adviser", sfFields.adviser?.value.trim());
+    setText("of-student", data.student);
+    setText("of-company", data.company);
+    setText("of-supervisor", data.supervisor);
+    setText("of-supervisor-name", data.supervisor);
+    setText("of-supervisor-position", data.supervisorPosition ? `Position: ${data.supervisorPosition}` : "");
+    setText("of-period", data.period);
+    setText("of-period-total", document.getElementById("total-monthly-hours-val")?.textContent.trim());
+    const required = sfFields.required?.value.trim();
+    setText("of-required", required ? `${required} hrs` : "");
+  }
+
+  function openSchoolModal() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SCHOOL_FORM_STORE) || "{}");
+      Object.keys(sfFields).forEach((key) => {
+        if (saved[key] && sfFields[key]) sfFields[key].value = saved[key];
+      });
+    } catch (e) {}
+    schoolModal?.classList.add("active");
+  }
+
+  function closeSchoolModal() {
+    schoolModal?.classList.remove("active");
+  }
+
+  schoolFormBtn?.addEventListener("click", openSchoolModal);
+  document.getElementById("sf-cancel")?.addEventListener("click", closeSchoolModal);
+  schoolModal?.addEventListener("click", (e) => {
+    if (e.target === schoolModal) closeSchoolModal();
+  });
+
+  document.getElementById("sf-generate")?.addEventListener("click", () => {
+    const prefs = {};
+    Object.keys(sfFields).forEach((key) => {
+      prefs[key] = sfFields[key]?.value.trim() || "";
+    });
+    try {
+      localStorage.setItem(SCHOOL_FORM_STORE, JSON.stringify(prefs));
+    } catch (e) {}
+
+    buildOfficialForm();
+    closeSchoolModal();
+
+    // html2canvas only renders what's laid out on screen, so bring the template into the viewport
+    // behind the full-screen loading overlay for the moment it takes to capture.
+    window.showLoadingSpinner?.("GENERATING SCHOOL FORM...");
+    officialForm.style.left = "0";
+    officialForm.style.zIndex = "1";
+
+    const restoreForm = () => {
+      officialForm.style.left = "";
+      officialForm.style.zIndex = "";
+      window.hideLoadingSpinner?.();
+    };
+
+    html2pdf()
+      .set({
+        margin: 0,
+        filename: officialForm?.dataset.filename || "Official_DTR.pdf",
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, logging: false },
+        jsPDF: { unit: "in", format: "letter", orientation: "portrait" },
+        pagebreak: { mode: ["css", "avoid-all"] },
+      })
+      .from(officialForm)
+      .save()
+      .then(() => {
+        restoreForm();
+        window.showToast?.("School form downloaded", "success");
+      })
+      .catch((err) => {
+        restoreForm();
+        console.error("School form generation failed:", err);
+        window.showToast?.("Could not generate the school form. Please try again.", "error");
+      });
+  });
+
+  // Page walkthrough, replayable from the header's tour button.
+  window.InternFlowTour?.register("dtr", [
+    {
+      target: '[data-tour="dtr-source"]',
+      title: "Where these hours came from",
+      body: "This line tells you whether the sheet includes synced Clockify sessions or only the built-in timer and your manual entries — the usual reason a monthly total looks lower than expected.",
+    },
+    {
+      target: "#dtr-sheet .dtr-table",
+      title: "Edit it like a spreadsheet",
+      body: "Every time cell is editable. Type a time (e.g. 8, 1:30pm), press Enter or Tab to move on, and the daily and monthly totals recalculate as you go.",
+    },
+    {
+      target: "#download-pdf-btn",
+      title: "Download this view",
+      body: "Saves exactly what you see here as a PDF — handy for a quick submission or your own records.",
+    },
+    {
+      target: '[data-tour="school-form"]',
+      title: "Export the official school form",
+      body: "Same month's entries, re-laid out on a formal black-and-white practicum form with certification and signature blocks. Fill in your school details once and they're remembered for next time.",
+    },
+  ]);
 
   // Excel-like DTR Edit and Navigation Logic
   const dtrSheet = document.getElementById("dtr-sheet");
@@ -905,6 +1236,130 @@ const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
     filter: brightness(1.1);
     transform: translateY(-1px);
   }
+  .school-form-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(96, 165, 250, 0.12);
+    border: 1px solid rgba(96, 165, 250, 0.35);
+    color: #60a5fa;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  .school-form-btn:hover {
+    background: rgba(96, 165, 250, 0.2);
+    transform: translateY(-1px);
+  }
+
+  /* Where this month's numbers came from */
+  .dtr-source-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 1000px;
+    margin: 0 auto 18px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    background: rgba(237, 102, 33, 0.07);
+    border: 1px solid rgba(237, 102, 33, 0.22);
+  }
+  .dtr-source-banner.source-clockify {
+    background: rgba(52, 211, 153, 0.08);
+    border-color: rgba(52, 211, 153, 0.25);
+  }
+  .dtr-source-banner strong { color: var(--text-primary); font-weight: 700; }
+  .source-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--ntv-orange);
+    box-shadow: 0 0 8px var(--ntv-orange);
+  }
+  .source-clockify .source-dot { background: #34d399; box-shadow: 0 0 8px #34d399; }
+  .source-text { flex: 1; }
+  .source-link {
+    flex-shrink: 0;
+    color: var(--ntv-orange);
+    font-weight: 700;
+    font-size: 12px;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .source-link:hover { text-decoration: underline; }
+
+  /* School form modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 11, 22, 0.85);
+    backdrop-filter: blur(8px);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+  }
+  .modal-overlay.active { opacity: 1; pointer-events: auto; }
+  .modal-content {
+    background: var(--modal-bg);
+    border: 1px solid var(--border-subtle);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 28px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  }
+  .modal-title { font-size: 20px; font-weight: 700; color: var(--text-primary); }
+  .modal-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 8px 0 22px; }
+  .sf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .sf-field { display: flex; flex-direction: column; gap: 7px; }
+  .sf-field span {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .sf-field input {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 14px;
+    outline: none;
+    transition: 0.2s;
+    width: 100%;
+  }
+  .sf-field input:focus { border-color: var(--ntv-orange); }
+  .modal-actions-row { display: flex; justify-content: flex-end; gap: 12px; margin-top: 26px; }
+  .btn-cancel {
+    padding: 10px 18px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-cancel:hover { background: rgba(255, 255, 255, 0.09); }
 
   .dtr-scroll-wrapper {
     width: 100%;
@@ -1251,14 +1706,80 @@ const isEditable = user.id === viewUserId || mySettings.role === "coordinator";
       justify-content: space-between !important;
       width: 100% !important;
     }
-    .print-btn, .download-btn {
+    .actions-group { flex-wrap: wrap !important; }
+    .sf-grid { grid-template-columns: 1fr; }
+    .modal-content { padding: 22px; }
+    .print-btn, .download-btn, .school-form-btn {
       flex: 1 !important;
       justify-content: center !important;
+      min-width: 140px;
     }
   }
 
   @media (max-width: 900px) {
     #portal-main { margin-left: 0; padding: 20px; width: 100%; overflow-x: hidden; }
     .dtr-scroll-wrapper { padding: 20px 10px; }
+  }
+</style>
+
+<!-- Global (not scoped): the school form's table rows are built in JS, and Astro's scoped
+     styles only reach elements that exist in this template. -->
+<style is:global>
+  /* Print template for the school form: fixed black-on-white, theme independent, kept off-screen
+     until html2pdf renders it. */
+  .official-form {
+    position: absolute;
+    top: 0;
+    left: -10000px;
+    width: 8.5in;
+    padding: 0.45in 0.6in;
+    background: #fff;
+    color: #000;
+    font-family: "Times New Roman", Times, serif;
+    font-size: 11px;
+  }
+  .of-head { text-align: center; margin-bottom: 14px; }
+  .of-school { font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .of-college { font-size: 12px; margin-top: 2px; }
+  .of-doc-title { font-size: 14px; font-weight: 700; margin-top: 12px; letter-spacing: 0.08em; }
+  .of-doc-sub { font-size: 11px; font-style: italic; }
+  .of-info {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 26px;
+    margin: 14px 0 12px;
+  }
+  .of-info-row { display: flex; gap: 6px; align-items: baseline; }
+  .of-lbl { font-size: 10.5px; white-space: nowrap; }
+  .of-val { flex: 1; border-bottom: 1px solid #000; font-size: 10.5px; font-weight: 700; min-height: 14px; }
+  .of-table { width: 100%; border-collapse: collapse; }
+  .of-table th,
+  .of-table td {
+    border: 1px solid #000;
+    padding: 2px 4px;
+    text-align: center;
+    font-size: 10px;
+    height: 16px;
+  }
+  .of-table th { font-weight: 700; background: #eee; }
+  .of-col-day { width: 8%; }
+  .of-col-total { width: 14%; }
+  .of-table tr { page-break-inside: avoid; }
+  .of-row-nolog td { color: #777; }
+  .of-total-label { text-align: right !important; font-weight: 700; font-size: 10px; }
+  .of-total-val { font-weight: 700; }
+  .of-cert { margin-top: 14px; font-size: 10.5px; font-style: italic; }
+  .of-sign-row { display: flex; gap: 40px; margin-top: 34px; }
+  .of-sign-row-single { margin-top: 30px; }
+  .of-sign { flex: 1; text-align: center; }
+  .of-sign-row-single .of-sign { max-width: 48%; }
+  .of-sign-line { border-bottom: 1px solid #000; height: 18px; font-weight: 700; font-size: 11px; }
+  .of-sign-name { display: flex; align-items: flex-end; justify-content: center; }
+  .of-sign-label { font-size: 9.5px; margin-top: 3px; }
+  .of-sign-sub { font-size: 9.5px; font-style: italic; }
+
+  /* Keep the off-screen template out of "Print DTR" — it would come out as blank pages. */
+  @media print {
+    .official-form { display: none !important; }
   }
 </style>

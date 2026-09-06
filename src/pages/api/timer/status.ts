@@ -3,6 +3,7 @@ import { getSession } from '../../../lib/auth';
 import { parse } from 'cookie';
 import { getAppSettings } from '../../../lib/settings';
 import { getActiveTimer, updateTimerStart } from '../../../lib/entries';
+import { getClockifyUser } from '../../../lib/clockify';
 
 export const GET: APIRoute = async ({ request }) => {
   const cookieHeader = request.headers.get('cookie') || '';
@@ -28,11 +29,26 @@ export const GET: APIRoute = async ({ request }) => {
 
   const activeTimer = await getActiveTimer(session.id, settings.isEmployee ?? false);
 
+  // The header badge needs to say whether hours are flowing in from Clockify or only from the
+  // built-in timer — "enabled in settings" isn't enough, the email also has to resolve to a
+  // Clockify account for anything to actually sync.
+  const clockifyEnabled = settings.clockifyEnabled !== false;
+  let clockifyLinked = false;
+  if (clockifyEnabled) {
+    try {
+      clockifyLinked = !!(await getClockifyUser(session.email || ''));
+    } catch {
+      clockifyLinked = false;
+    }
+  }
+
   return new Response(JSON.stringify({
     applicable: true,
     active: !!activeTimer,
     startTime: activeTimer?.startTime ?? null,
     description: activeTimer?.description ?? '',
+    clockifyEnabled,
+    source: clockifyLinked ? 'clockify' : 'internal',
   }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },

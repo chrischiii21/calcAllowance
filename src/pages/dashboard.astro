@@ -22,9 +22,10 @@ const settings = await getAppSettings(user.id);
 const todayStr = new Date().toISOString().split('T')[0];
 const setupStartDate = (!settings.startDate || settings.startDate === DEFAULT_SETTINGS.startDate) ? todayStr : settings.startDate;
 
-// Role-based redirect
+// Role-based redirect. The header's tour button sends every page here, so carry the request
+// across to the coordinator's own walkthrough instead of dropping it.
 if (settings.role === 'coordinator') {
-  return Astro.redirect('/coordinator');
+  return Astro.redirect(Astro.url.searchParams.get('tour') ? '/coordinator?tour=1' : '/coordinator');
 }
 
 const activeStartDate = settings.isEmployee ? (settings.employeeStartDate || settings.startDate) : settings.startDate;
@@ -258,7 +259,7 @@ if (!settings.isEmployee) {
           <span class="step-num">2</span>
           <div class="step-details">
             <h4>Track OJT Hours</h4>
-            <p>Use the live <strong>Timer</strong> on the dashboard to track real-time activities, or log manual entries in the <strong>Tracker</strong> tab.</p>
+            <p>Use the <strong>Time In / Time Out</strong> button in the header for live sessions, or log manual entries in the <strong>Tracker</strong> tab. The badge beside it tells you whether <strong>Clockify</strong> is syncing too, or you're on the built-in timer alone.</p>
           </div>
         </div>
         <div class="guide-step">
@@ -744,9 +745,98 @@ if (!settings.isEmployee) {
   const isFirstLogin = params.get('firstLogin') === 'true';
   const hasSeenOnboarding = localStorage.getItem('has_seen_onboarding_student');
   const worksModal = document.getElementById('how-it-works-modal');
-  
-  if (isFirstLogin && !hasSeenOnboarding) {
-    if (worksModal) worksModal.style.display = 'flex';
+  const showedIntroModal = isFirstLogin && !hasSeenOnboarding;
+
+  if (showedIntroModal && worksModal) {
+    worksModal.style.display = 'flex';
+  }
+
+  // Guided walkthrough of the whole app. Registering it also arms the header's tour button,
+  // which replays these steps on demand.
+  const dashboardTourSteps = [
+    {
+      target: '[data-tour="nav-dashboard"]',
+      title: "You're on the Dashboard",
+      body: 'This is your home base: hours rendered, time remaining, streaks and progress charts, all built from the sessions you log.',
+    },
+    {
+      target: '.metrics-grid',
+      title: 'Progress at a glance',
+      body: 'Total hours against your target, plus how much time is left and an estimated finish date based on your recent pace.',
+    },
+    {
+      target: '.quick-stats',
+      title: 'Quick stats',
+      body: 'Tap any tile to expand it — each one explains how its number was calculated, so nothing here is a black box.',
+    },
+    {
+      target: '.weekly-chart-card',
+      title: 'Weekly activity',
+      body: 'Hours grouped by week for the current month, so a light week is obvious before it becomes a problem.',
+    },
+    {
+      target: '.progress-chart-card',
+      title: 'Progress trend',
+      body: 'Your cumulative hours over time against the target line. Hover or drag across it to read any specific day.',
+    },
+    {
+      target: '#clock-toggle-wrap',
+      title: 'Time In / Time Out',
+      body: 'Start a live session with Time In and close it with Time Out — the timer keeps running even if you close the tab. The pencil corrects a start time you punched in late.',
+    },
+    {
+      target: '[data-tour="sync-source"]',
+      title: 'Clockify sync vs. the built-in timer',
+      body: 'This badge says where your hours come from. Green "Clockify Synced" means Clockify sessions are pulled in automatically and combined with what you log here. Orange "Internal Timer" means only this timer and your manual entries count. Tap it to switch the integration on or off.',
+    },
+    {
+      target: '[data-tour="nav-tracker"]',
+      title: 'Time Tracker',
+      body: "Log or edit sessions by hand for days you forgot to clock in — attach a screenshot as proof so your coordinator can approve it.",
+    },
+    {
+      target: '[data-tour="nav-sync-logs"]',
+      title: 'Sync Logs',
+      body: 'A running record of every sync and clock action, so you can confirm a session was actually saved.',
+    },
+    {
+      target: '[data-tour="nav-dtr"]',
+      title: 'DTR Sheet',
+      body: 'Your Daily Time Record builds itself from tracked hours. Edit any cell like a spreadsheet, then print it or export it as a school-ready PDF form.',
+    },
+    {
+      target: '[data-tour="nav-attendance"]',
+      title: 'Attendance Chart',
+      body: 'Mark each day Present, WFH, Absent, Sick or Vacation. Days you mark as worked but never logged get flagged on your DTR.',
+    },
+    {
+      target: '[data-tour="nav-earnings"]',
+      title: 'Earnings',
+      body: 'If your internship pays an allowance, this projects what you have earned per pay period from the hours you tracked.',
+    },
+    {
+      target: '[data-tour="nav-settings"]',
+      title: 'Settings',
+      body: 'Target hours, start date, company and supervisor details, pay rate, your coordinator link, and the Clockify integration all live here.',
+    },
+    {
+      target: '[data-tour="tour-button"]',
+      title: 'Replay this tour any time',
+      body: 'Lost later on? This button reopens the walkthrough from wherever you are. That is the whole app — go clock in.',
+    },
+  ];
+
+  window.InternFlowTour?.register('dashboard', dashboardTourSteps);
+
+  // The header's timer and sync badge fill themselves in from an async request; give them a beat
+  // so the walkthrough doesn't drop the steps that point at them.
+  function startTour(force) {
+    // The setup wizard has to be finished first — the dashboard behind it is still empty.
+    if (document.getElementById('setup-wizard-overlay')) return;
+    setTimeout(() => {
+      if (force) window.InternFlowTour?.start();
+      else window.InternFlowTour?.startIfNew();
+    }, 700);
   }
 
   // Bind close buttons to dismiss and mark as seen
@@ -754,10 +844,17 @@ if (!settings.isEmployee) {
   closeBtn?.addEventListener('click', () => {
     localStorage.setItem('has_seen_onboarding_student', 'true');
     worksModal.style.display = 'none';
+    startTour(false);
   });
 
+  if (params.get('tour') === '1') {
+    startTour(true);
+  } else if (!showedIntroModal) {
+    startTour(false);
+  }
+
   // Clear query parameters
-  if (isFirstLogin) {
+  if (isFirstLogin || params.get('tour')) {
     const newUrl = window.location.pathname;
     window.history.replaceState({}, '', newUrl);
   }

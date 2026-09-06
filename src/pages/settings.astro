@@ -482,10 +482,10 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
                 </div>
                 <p class="status-desc">
                   {isClockifySet && settings.clockifyEnabled
-                    ? 'Your system is currently syncing with Clockify using the environment variables provided.' 
-                    : (settings.clockifyEnabled 
+                    ? 'Sessions you track in Clockify sync in automatically and are combined with the built-in Time In/Out timer for your hours and DTR.'
+                    : (settings.clockifyEnabled
                         ? 'Update your .env file with CLOCKIFY_API_KEY and CLOCKIFY_WORKSPACE_ID to enable syncing.'
-                        : 'Clockify integration is disabled. Your records will be based on manual logs.')}
+                        : 'Clockify sync is off. Your hours and DTR come from the built-in Time In/Out timer and manual entries — tracking keeps working either way.')}
                 </p>
               </div>
               
