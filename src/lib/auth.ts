@@ -95,15 +95,21 @@ export async function destroySession(id: string) {
 }
 
 export async function deleteAccount(userId: string) {
-  // Delete all user-related data in order to respect any constraints
+  // Every table that holds rows keyed to this person. Anything missed here stays behind as
+  // orphaned data that no longer belongs to any account.
   await supabase.from('entries').delete().eq('user_id', userId);
   await supabase.from('active_timers').delete().eq('user_id', userId);
   await supabase.from('attendance_overrides').delete().eq('user_id', userId);
   await supabase.from('attendance_config').delete().eq('user_id', userId);
   await supabase.from('attendance_holidays').delete().eq('user_id', userId);
+  await supabase.from('shift_config').delete().eq('user_id', userId);
+  await supabase.from('payout_adjustments').delete().eq('user_id', userId);
+  await supabase.from('sync_logs').delete().eq('user_id', userId);
 
-  // Attempt to delete from all possible settings tables
+  // A coordinator's sections go too; their students' coordinator_id/section_id are cleared by the
+  // ON DELETE SET NULL references on those columns.
+  await supabase.from('coordinator_sections').delete().eq('coordinator_id', userId);
+
   await supabase.from('student_settings').delete().eq('user_id', userId);
   await supabase.from('coordinator_settings').delete().eq('user_id', userId);
-  await supabase.from('settings').delete().eq('user_id', userId);
 }

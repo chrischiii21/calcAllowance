@@ -78,9 +78,30 @@ export async function getRenderedHours(clockifyUserId: string, startDate?: strin
   return result;
 }
 
-export async function getStudentProgress(userId: string, email: string, startDate?: string) {
-  const { data: settings } = await supabase.from('student_settings').select('rendered_hours, clockify_enabled').eq('user_id', userId).single();
-  let manualHours = settings?.rendered_hours || 0;
+// Total hours rendered = everything logged in this system (manual entries and Time In/Out
+// sessions, both stored in `entries`) plus whatever Clockify holds when syncing is on.
+// This used to read a `rendered_hours` column that nothing in the app ever writes, so manual
+// entries were invisible to every progress figure.
+export async function getStudentProgress(userId: string, email: string, startDate?: string, isEmployee = false) {
+  const { data: settings } = await supabase
+    .from('student_settings')
+    .select('clockify_enabled')
+    .eq('user_id', userId)
+    .single();
+
+  let query = supabase
+    .from('entries')
+    .select('duration_seconds')
+    .eq('user_id', userId)
+    .eq('is_employee', isEmployee);
+
+  if (startDate) {
+    query = query.gte('start_time', new Date(`${startDate}T00:00:00+08:00`).toISOString());
+  }
+
+  const { data: rows } = await query;
+  const loggedHours = (rows || []).reduce((sum: number, row: any) => sum + (row.duration_seconds || 0), 0) / 3600;
+
   let clockifyHours = 0;
   if (settings?.clockify_enabled !== false) {
     try {
@@ -91,7 +112,8 @@ export async function getStudentProgress(userId: string, email: string, startDat
       }
     } catch (e) {}
   }
-  return Number(manualHours) + clockifyHours;
+
+  return loggedHours + clockifyHours;
 }
 
 export async function getDailyDTR(clockifyUserId: string, month: number, year: number, manualEntries: any[] = [], shiftType: ShiftType = 'day') {

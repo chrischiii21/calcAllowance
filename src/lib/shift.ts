@@ -44,6 +44,19 @@ export async function getShiftConfig(userId: string): Promise<ShiftConfig> {
   };
 }
 
+// Length of one shift in seconds, handling shifts that cross midnight (e.g. 21:00 → 06:00).
+export function shiftLengthSeconds(config: ShiftConfig): number {
+  const toSeconds = (hhmm: string) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return (h || 0) * 3600 + (m || 0) * 60;
+  };
+
+  const start = toSeconds(config.shiftStart);
+  const end = toSeconds(config.shiftEnd);
+  const length = end > start ? end - start : end + 86400 - start;
+  return length > 0 ? length : 8 * 3600;
+}
+
 export async function saveShiftConfig(userId: string, config: ShiftConfig): Promise<void> {
   const { error } = await supabase
     .from('shift_config')

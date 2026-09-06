@@ -9,6 +9,7 @@ import { getManualEntries } from '../lib/entries';
 import { getClockifyUser, getRenderedHours, getStudentProgress } from '../lib/clockify';
 import { formatHours } from '../lib/utils';
 import { groupEntries } from '../lib/grouping';
+import { periodEarnings, totalEarnings as sumEarnings } from '../lib/earnings';
 import { getPayoutAdjustments } from '../lib/payouts';
 
 const cookieHeader = Astro.request.headers.get('cookie') || '';
@@ -31,7 +32,7 @@ if (settings.setupComplete === false) {
 const activeStartDate = settings.isEmployee ? (settings.employeeStartDate || settings.startDate) : settings.startDate;
 const activePaySchedule = settings.isEmployee ? (settings.employeePaySchedule || 'monthly') : settings.paySchedule;
 
-const renderedHours = await getStudentProgress(user.id, user.email, activeStartDate);
+const renderedHours = await getStudentProgress(user.id, user.email, activeStartDate, settings.isEmployee);
 
 let allRawEntries: { date: string, durationSeconds: number }[] = [];
 try {
@@ -57,14 +58,7 @@ const adjustments = await getPayoutAdjustments(user.id);
 
 let runningCarryOver = 0;
 const monthlyDataRaw = grouped.map(item => {
-  let calculatedEarnings = 0;
-  if (settings.isEmployee) {
-    calculatedEarnings = settings.paySchedule === 'semi-monthly'
-      ? (settings.monthlyRate || 0) / 2
-      : (settings.monthlyRate || 0);
-  } else {
-    calculatedEarnings = (item.totalSeconds / 3600) * settings.hourlyRate;
-  }
+  const calculatedEarnings = periodEarnings(settings, item);
   const totalExpected = calculatedEarnings + runningCarryOver;
 
   const isSet = adjustments[item.label] !== undefined;
@@ -74,6 +68,7 @@ const monthlyDataRaw = grouped.map(item => {
   const entry = {
     label: item.label,
     rendered: item.totalSeconds / 3600,
+    daysWorked: item.daysWorked,
     calculated: calculatedEarnings,
     totalExpected,
     actualReceived,
@@ -88,9 +83,8 @@ const monthlyDataRaw = grouped.map(item => {
 
 const monthlyData = [...monthlyDataRaw].reverse();
 
-const totalEarnings = settings.isEmployee
-  ? monthlyDataRaw.reduce((sum, item) => sum + item.calculated, 0)
-  : renderedHours * settings.hourlyRate;
+// Sum the same per-period figures shown in the list, so the header total can't drift from the rows.
+const totalEarnings = sumEarnings(settings, grouped);
 
 const isEarningsMode = settings.hasAllowance || settings.isEmployee;
 ---
@@ -134,7 +128,11 @@ const isEarningsMode = settings.hasAllowance || settings.isEmployee;
         <div class="item-meta">
           {isEarningsMode ? (
             <>
-              <span class="item-hours">{formatHours(item.rendered)} tracked</span>
+              <span class="item-hours">
+                {!settings.isEmployee && settings.payType === 'daily'
+                  ? `${item.daysWorked} ${item.daysWorked === 1 ? 'day' : 'days'} worked · ${formatHours(item.rendered)}`
+                  : `${formatHours(item.rendered)} tracked`}
+              </span>
               {item.carryOverIn !== 0 && (
                 <span class={`carry-tag ${item.carryOverIn > 0 ? 'plus' : 'minus'}`}>
                   {item.carryOverIn > 0 ? '+' : ''}₱{item.carryOverIn.toLocaleString()} carry-over

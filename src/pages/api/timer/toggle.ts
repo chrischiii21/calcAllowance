@@ -32,10 +32,25 @@ export const POST: APIRoute = async ({ request }) => {
     const existing = await getActiveTimer(session.id, isEmployee);
 
     if (existing) {
-      await stopTimer(session.id, '', isEmployee);
+      const result = await stopTimer(session.id, '', isEmployee);
+      const hours = (result.durationSeconds / 3600).toFixed(2);
       const { addSyncLog } = await import('../../../lib/logs');
-      await addSyncLog({ userId: session.id, type: 'Sync', status: 'Success', details: 'Timed out' });
-      return new Response(JSON.stringify({ success: true, active: false }), {
+      await addSyncLog({
+        userId: session.id,
+        type: 'Sync',
+        status: result.capped ? 'Warning' : 'Success',
+        details: result.capped
+          ? `Timed out — timer had been left running since ${new Date(result.startTime).toLocaleString('en-US', { timeZone: 'Asia/Manila' })}; saved one shift (${hours}h) instead of the full gap`
+          : 'Timed out',
+      });
+      return new Response(JSON.stringify({
+        success: true,
+        active: false,
+        capped: result.capped,
+        message: result.capped
+          ? `That timer had been running since ${new Date(result.startTime).toLocaleDateString('en-US', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric' })}. Saved one shift (${hours}h) — edit that day on your DTR if the real time-out was different.`
+          : null,
+      }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });

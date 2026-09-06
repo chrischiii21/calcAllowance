@@ -73,18 +73,32 @@ export const POST: APIRoute = async ({ request }) => {
       // Find coordinator/section by invite code
       const { supabase } = await import('../../lib/supabase');
       
-      // Try to find the invite code in coordinator_sections
+      const code = coordinatorInvite.toUpperCase().trim();
+
+      // Section codes are the normal path.
       const { data: section } = await supabase
         .from('coordinator_sections')
         .select('id, coordinator_id')
-        .eq('invite_code', coordinatorInvite.toUpperCase().trim())
+        .eq('invite_code', code)
         .maybeSingle();
-      
+
       if (section) {
         coordinatorId = section.coordinator_id;
         sectionId = section.id;
       } else {
-        throw new Error('Invalid invite code. Please check with your coordinator.');
+        // Coordinators are also shown a personal code on their Settings page, so accept that too
+        // and link the student with no section rather than rejecting a code we handed out.
+        const { data: coordinator } = await supabase
+          .from('coordinator_settings')
+          .select('user_id')
+          .eq('invite_code', code)
+          .maybeSingle();
+
+        if (!coordinator) {
+          throw new Error('Invalid invite code. Please check with your coordinator.');
+        }
+        coordinatorId = coordinator.user_id;
+        sectionId = null as any;
       }
     }
 

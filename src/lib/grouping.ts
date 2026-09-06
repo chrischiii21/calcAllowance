@@ -1,63 +1,71 @@
 export interface GroupedEntry {
   label: string;
   totalSeconds: number;
+  daysWorked: number; // distinct dates with logged time — what a fixed daily rate is paid on
   firstDate: string; // ISO string of the first date in this group for sorting
 }
 
 export function groupEntries(entries: { date: string, durationSeconds: number }[], paySchedule: string): GroupedEntry[] {
-  const groups: Record<string, { totalSeconds: number, firstDate: string }> = {};
+  const groups: Record<string, { totalSeconds: number, dates: Set<string>, firstDate: string }> = {};
 
   entries.forEach(entry => {
-    const date = new Date(entry.date);
+    // Dates arrive as plain 'YYYY-MM-DD' in Manila time. Reading them through the runtime's local
+    // timezone would push an entry into the wrong period on any server west of UTC, so the parts
+    // are used directly.
+    const [year, month, day] = entry.date.split('-').map(Number);
+    if (!year || !month || !day) return;
+
     let label = '';
 
     if (paySchedule === 'weekly') {
-      const week = getWeekNumber(date);
-      label = `Week ${week} (${date.getFullYear()})`;
+      label = `Week ${getWeekNumber(year, month, day)} (${year})`;
     } else if (paySchedule === 'semi-monthly') {
-      const day = date.getDate();
-      let targetMonth = date;
-      
-      // If date is 30th or 31st, it belongs to the NEXT month's first payday (15th)
-      if (day >= 30) {
-        targetMonth = new Date(date.getFullYear(), date.getMonth() + 1, 1);
-      }
-      
-      const monthName = targetMonth.toLocaleString('en-US', { month: 'long' });
-      const year = targetMonth.getFullYear();
-      
-      if (day >= 30 || day <= 14) {
-        label = `${monthName} 1st-14th Period (${year})`;
-      } else {
-        label = `${monthName} 15th-29th Period (${year})`;
-      }
+      // The 30th/31st fall after the second cut-off, so they're paid with the next month's first period.
+      const rollsOver = day >= 30;
+      const periodYear = rollsOver && month === 12 ? year + 1 : year;
+      const periodMonth = rollsOver ? (month === 12 ? 1 : month + 1) : month;
+
+      label = rollsOver || day <= 14
+        ? `${monthName(periodMonth)} 1st-14th Period (${periodYear})`
+        : `${monthName(periodMonth)} 15th-29th Period (${periodYear})`;
     } else {
-      // Monthly default
-      label = date.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      label = `${monthName(month)} ${year}`;
     }
 
     if (!groups[label]) {
-      groups[label] = { totalSeconds: 0, firstDate: entry.date };
-    } else {
-      // Keep the earliest date as the representative
-      if (new Date(entry.date) < new Date(groups[label].firstDate)) {
-        groups[label].firstDate = entry.date;
-      }
+      groups[label] = { totalSeconds: 0, dates: new Set(), firstDate: entry.date };
+    } else if (entry.date < groups[label].firstDate) {
+      // ISO dates sort lexicographically, so no Date parsing is needed to find the earliest.
+      groups[label].firstDate = entry.date;
     }
+
     groups[label].totalSeconds += entry.durationSeconds;
+    // An open punch (start === end) hasn't produced a worked day yet.
+    if (entry.durationSeconds > 0) groups[label].dates.add(entry.date);
   });
 
-  return Object.keys(groups).map(label => ({
-    label,
-    totalSeconds: groups[label].totalSeconds,
-    firstDate: groups[label].firstDate
-  })).sort((a, b) => new Date(a.firstDate).getTime() - new Date(b.firstDate).getTime());
+  return Object.keys(groups)
+    .map(label => ({
+      label,
+      totalSeconds: groups[label].totalSeconds,
+      daysWorked: groups[label].dates.size,
+      firstDate: groups[label].firstDate,
+    }))
+    .sort((a, b) => a.firstDate.localeCompare(b.firstDate));
 }
 
-function getWeekNumber(d: Date): number {
-  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+function monthName(month: number): string {
+  return MONTH_NAMES[month - 1] ?? '';
+}
+
+function getWeekNumber(year: number, month: number, day: number): number {
+  const d = new Date(Date.UTC(year, month - 1, day));
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-  return weekNo;
+  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
 }

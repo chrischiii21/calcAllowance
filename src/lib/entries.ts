@@ -217,6 +217,10 @@ export async function startTimer(userId: string, description: string = '', isEmp
   return data;
 }
 
+// Nobody works a single session longer than this. Past it, the timer was forgotten rather than
+// running, so the punch is closed at one shift's length instead of banking the whole gap.
+const FORGOTTEN_TIMER_SECONDS = 24 * 3600;
+
 export async function stopTimer(userId: string, description: string, isEmployee: boolean = false) {
   const timer = await getActiveTimer(userId, isEmployee);
   if (!timer) throw new Error('No active timer found');
@@ -228,7 +232,16 @@ export async function stopTimer(userId: string, description: string, isEmployee:
 
   const now = new Date();
   const start = new Date(timer.startTime);
-  const durationSeconds = Math.floor((now.getTime() - start.getTime()) / 1000);
+  let durationSeconds = Math.max(0, Math.floor((now.getTime() - start.getTime()) / 1000));
+  let end = now;
+  let capped = false;
+
+  if (durationSeconds > FORGOTTEN_TIMER_SECONDS) {
+    const { getShiftConfig, shiftLengthSeconds } = await import('./shift');
+    durationSeconds = shiftLengthSeconds(await getShiftConfig(userId));
+    end = new Date(start.getTime() + durationSeconds * 1000);
+    capped = true;
+  }
 
   const { error: logError } = await supabase
     .from('entries')
@@ -236,8 +249,8 @@ export async function stopTimer(userId: string, description: string, isEmployee:
       user_id: userId,
       description: finalDescription,
       start_time: start.toISOString(),
-      end_time: now.toISOString(),
-      duration_seconds: Math.max(0, durationSeconds),
+      end_time: end.toISOString(),
+      duration_seconds: durationSeconds,
       is_employee: isEmployee
     });
 
@@ -250,6 +263,8 @@ export async function stopTimer(userId: string, description: string, isEmployee:
     .eq('is_employee', isEmployee);
 
   if (error) throw error;
+
+  return { capped, durationSeconds, startTime: start.toISOString(), endTime: end.toISOString() };
 }
 
 export async function updateTimerStart(userId: string, startTimeStr: string, isEmployee: boolean = false) {

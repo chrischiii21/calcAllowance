@@ -9,6 +9,7 @@ import { getManualEntries } from '../lib/entries';
 import { getClockifyUser, getRenderedHours, getStudentProgress } from '../lib/clockify';
 import { formatHMS, formatHours } from '../lib/utils';
 import { groupEntries } from '../lib/grouping';
+import { totalEarnings, totalDaysWorked } from '../lib/earnings';
 
 const cookieHeader = Astro.request.headers.get('cookie') || '';
 const cookies = parse(cookieHeader);
@@ -33,7 +34,7 @@ const activePaySchedule = settings.isEmployee ? (settings.employeePaySchedule ||
 const activeCompany = settings.isEmployee ? (settings.employerCompany || settings.hostCompany) : settings.hostCompany;
 
 // Calculate Total Progress using the Unified Sync Engine
-const renderedHours = await getStudentProgress(user.id, user.email, activeStartDate);
+const renderedHours = await getStudentProgress(user.id, user.email, activeStartDate, settings.isEmployee);
 
 // Fetch detailed entry breakdown for the chart/list
 let allRawEntries: { date: string, durationSeconds: number }[] = [];
@@ -97,19 +98,18 @@ for (let i = 0; i < 3650; i++) {
   else break;
 }
 
-// Lightweight earnings estimate for the dashboard summary tile (full breakdown lives on /earnings)
-let quickEarnings = 0;
-let quickEarningsPeriods = 0;
-let quickEarningsRate = 0;
-if (settings.hasAllowance || settings.isEmployee) {
-  if (settings.isEmployee) {
-    quickEarningsPeriods = groupEntries(allRawEntries, activePaySchedule).length;
-    quickEarningsRate = settings.paySchedule === 'semi-monthly' ? (settings.monthlyRate || 0) / 2 : (settings.monthlyRate || 0);
-    quickEarnings = quickEarningsPeriods * quickEarningsRate;
-  } else {
-    quickEarnings = renderedHours * settings.hourlyRate;
-  }
-}
+// Earnings estimate for the dashboard tile. Built from the same grouped periods and the same pay
+// math as /earnings, so the two screens can't disagree.
+const earningsGroups = (settings.hasAllowance || settings.isEmployee)
+  ? groupEntries(allRawEntries, activePaySchedule)
+  : [];
+const quickEarnings = totalEarnings(settings, earningsGroups);
+const quickEarningsPeriods = earningsGroups.length;
+const quickEarningsDays = totalDaysWorked(earningsGroups);
+const quickEarningsHours = earningsGroups.reduce((sum, group) => sum + group.totalSeconds, 0) / 3600;
+const quickEarningsRate = settings.isEmployee
+  ? (activePaySchedule === 'semi-monthly' ? (settings.monthlyRate || 0) / 2 : (settings.monthlyRate || 0))
+  : settings.hourlyRate;
 
 // All-time activity stats: active day count, longest consecutive streak, average pace, this-month total
 const activeDates = Object.keys(dailyHoursMap).filter(d => dailyHoursMap[d] > 0).sort();
@@ -642,7 +642,9 @@ if (!settings.isEmployee) {
               <p class="stat-explain">
                 {settings.isEmployee
                   ? `${quickEarningsPeriods} pay period(s) × ₱${quickEarningsRate.toLocaleString()} on your ${activePaySchedule} schedule.`
-                  : `${formatHours(renderedHours)} tracked × ₱${settings.hourlyRate}/hr.`}
+                  : settings.payType === 'daily'
+                    ? `${quickEarningsDays} day(s) worked × ₱${settings.hourlyRate}/day.`
+                    : `${formatHours(quickEarningsHours)} tracked × ₱${settings.hourlyRate}/hr.`}
                 {' '}<a href="/earnings" class="stat-explain-link">View full breakdown →</a>
               </p>
             </div>
@@ -788,11 +790,6 @@ if (!settings.isEmployee) {
       target: '[data-tour="sync-source"]',
       title: 'Clockify sync vs. the built-in timer',
       body: 'This badge says where your hours come from. Green "Clockify Synced" means Clockify sessions are pulled in automatically and combined with what you log here. Orange "Internal Timer" means only this timer and your manual entries count. Tap it to switch the integration on or off.',
-    },
-    {
-      target: '[data-tour="nav-sync-logs"]',
-      title: 'Sync Logs',
-      body: 'A running record of every sync and clock action, so you can confirm a session was actually saved.',
     },
     {
       target: '[data-tour="nav-tracker"]',
