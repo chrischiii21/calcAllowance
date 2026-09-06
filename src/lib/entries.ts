@@ -120,6 +120,38 @@ export async function deleteManualEntry(id: string) {
   if (error) throw error;
 }
 
+// Everything that counts toward hours for a period: Clockify sessions (when syncing is on) plus
+// the entries logged in this system. Dates are plain 'YYYY-MM-DD' in Manila time, so they compare
+// as strings without dragging the server's timezone into it.
+export async function getTrackedEntries(
+  userId: string,
+  email: string,
+  settings: { clockifyEnabled?: boolean; isEmployee?: boolean },
+  startDate: string,
+): Promise<{ date: string; durationSeconds: number }[]> {
+  const collected: { date: string; durationSeconds: number }[] = [];
+
+  if (settings.clockifyEnabled !== false) {
+    try {
+      const { getClockifyUser, getRenderedHours } = await import('./clockify');
+      const clockifyUser = await getClockifyUser(email);
+      if (clockifyUser) {
+        const data = await getRenderedHours(clockifyUser.id, startDate);
+        collected.push(...data.entries);
+      }
+    } catch (e) {}
+  }
+
+  const manual = await getManualEntries(userId, settings.isEmployee ?? false);
+  for (const entry of manual) {
+    if (entry.date >= startDate) {
+      collected.push({ date: entry.date, durationSeconds: entry.durationSeconds });
+    }
+  }
+
+  return collected;
+}
+
 export interface ActiveTimer {
   userId: string;
   startTime: string; // ISO String

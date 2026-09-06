@@ -5,11 +5,12 @@ import Sidebar from '../components/Sidebar.astro';
 import { getSession } from '../lib/auth';
 import { parse } from 'cookie';
 import { getAppSettings, DEFAULT_SETTINGS } from '../lib/settings';
-import { getManualEntries } from '../lib/entries';
-import { getClockifyUser, getRenderedHours, getStudentProgress } from '../lib/clockify';
+import { getTrackedEntries } from '../lib/entries';
+import { getStudentProgress } from '../lib/clockify';
 import { formatHMS, formatHours } from '../lib/utils';
 import { groupEntries } from '../lib/grouping';
-import { totalEarnings, totalDaysWorked } from '../lib/earnings';
+import { totalEarnings, totalDaysWorked, buildPeriodBreakdown } from '../lib/earnings';
+import { getPayoutAdjustments } from '../lib/payouts';
 
 const cookieHeader = Astro.request.headers.get('cookie') || '';
 const cookies = parse(cookieHeader);
@@ -36,26 +37,8 @@ const activeCompany = settings.isEmployee ? (settings.employerCompany || setting
 // Calculate Total Progress using the Unified Sync Engine
 const renderedHours = await getStudentProgress(user.id, user.email, activeStartDate, settings.isEmployee);
 
-// Fetch detailed entry breakdown for the chart/list
-let allRawEntries: { date: string, durationSeconds: number }[] = [];
-try {
-  if (settings.clockifyEnabled !== false) {
-    const clockifyUser = await getClockifyUser(user.email);
-    if (clockifyUser) {
-      const clockifyData = await getRenderedHours(clockifyUser.id, activeStartDate);
-      allRawEntries = [...clockifyData.entries];
-    }
-  }
-} catch (e) {}
-
-// Always add manual entries to the breakdown
-const manualEntries = await getManualEntries(user.id, settings.isEmployee);
-allRawEntries = [
-  ...allRawEntries,
-  ...manualEntries
-    .filter(e => new Date(e.date) >= new Date(activeStartDate))
-    .map(e => ({ date: e.date, durationSeconds: e.durationSeconds }))
-];
+// Everything that counts toward hours: synced Clockify sessions plus entries logged here.
+const allRawEntries = await getTrackedEntries(user.id, user.email, settings, activeStartDate);
 
 // Weekly activity chart: hours per day for the last 7 calendar days (zero-filled)
 const dailyHoursMap: Record<string, number> = {};
@@ -73,17 +56,33 @@ const weeklyChartData = Array.from({ length: 7 }, (_, i) => {
 });
 const maxDailyHours = Math.max(1, ...weeklyChartData.map(d => d.hours));
 
-// Chart: weekly totals for the current month, so long vs. light weeks are comparable
-const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-const monthWeeksData = Array.from({ length: Math.ceil(daysInMonth / 7) }, (_, i) => ({
-  label: `W${i + 1}`,
-  range: `${i * 7 + 1}–${Math.min(i * 7 + 7, daysInMonth)}`,
-  hours: 0,
-}));
+// Weekly totals for the current month, in 7-day blocks from the 1st. Each row names the dates it
+// covers — "W3" on its own tells you nothing about which days are in it.
+const now = new Date();
+const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+const monthShort = now.toLocaleDateString('en-US', { month: 'short' });
+const todayDayOfMonth = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }).slice(8, 10));
+
+const monthWeeksData = Array.from({ length: Math.ceil(daysInMonth / 7) }, (_, i) => {
+  const from = i * 7 + 1;
+  const to = Math.min(i * 7 + 7, daysInMonth);
+  return {
+    label: `${monthShort} ${from}–${to}`,
+    from,
+    to,
+    isCurrent: todayDayOfMonth >= from && todayDayOfMonth <= to,
+    days: 0,
+    hours: 0,
+  };
+});
+
 Object.entries(dailyHoursMap)
   .filter(([d]) => d.startsWith(new Date().toISOString().slice(0, 7)))
   .forEach(([d, h]) => {
-    monthWeeksData[Math.floor((Number(d.slice(8, 10)) - 1) / 7)].hours += h;
+    const week = monthWeeksData[Math.floor((Number(d.slice(8, 10)) - 1) / 7)];
+    if (!week) return;
+    week.hours += h;
+    if (h > 0) week.days++;
   });
 const maxWeekHours = Math.max(1, ...monthWeeksData.map(w => w.hours));
 const totalWeekHours = weeklyChartData.reduce((sum, d) => sum + d.hours, 0);
@@ -98,12 +97,14 @@ for (let i = 0; i < 3650; i++) {
   else break;
 }
 
-// Earnings estimate for the dashboard tile. Built from the same grouped periods and the same pay
-// math as /earnings, so the two screens can't disagree.
-const earningsGroups = (settings.hasAllowance || settings.isEmployee)
-  ? groupEntries(allRawEntries, activePaySchedule)
-  : [];
-const quickEarnings = totalEarnings(settings, earningsGroups);
+// Period breakdown behind the earnings tile — the full list opens in a modal from the tile, so
+// there's no separate page to keep in step.
+const isEarningsMode = !!(settings.hasAllowance || settings.isEmployee);
+const earningsGroups = groupEntries(allRawEntries, isEarningsMode ? activePaySchedule : 'monthly');
+const payoutAdjustments = isEarningsMode ? await getPayoutAdjustments(user.id) : {};
+const periodRows = buildPeriodBreakdown(settings, earningsGroups, payoutAdjustments).reverse();
+
+const quickEarnings = isEarningsMode ? totalEarnings(settings, earningsGroups) : 0;
 const quickEarningsPeriods = earningsGroups.length;
 const quickEarningsDays = totalDaysWorked(earningsGroups);
 const quickEarningsHours = earningsGroups.reduce((sum, group) => sum + group.totalSeconds, 0) / 3600;
@@ -280,6 +281,85 @@ if (!settings.isEmployee) {
       
       <div class="modal-actions-single">
         <button type="button" class="btn-onboarding" onclick="document.getElementById('how-it-works-modal').style.display='none'">Got it, let's start!</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Period breakdown: the old Earnings page, opened from the tile above instead of its own tab -->
+  <div id="breakdown-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content breakdown-modal-content">
+      <div class="breakdown-header">
+        <div>
+          <h3>{isEarningsMode ? 'Earnings' : 'Hours'} Breakdown</h3>
+          <p class="modal-subtitle">
+            {isEarningsMode
+              ? 'Expected pay and payout status for each period.'
+              : 'Your logged hours grouped by month.'}
+          </p>
+        </div>
+        <button type="button" id="breakdown-close" class="breakdown-close" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      {isEarningsMode && (
+        <div class="breakdown-total">
+          <span>Total Expected</span>
+          <strong id="breakdown-total-value">₱ {quickEarnings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+        </div>
+      )}
+
+      <div id="breakdown-list" class="breakdown-list">
+        {periodRows.map(row => (
+          <div class="bd-row" data-label={row.label}>
+            <div class="bd-main">
+              <span class="bd-label">{row.label}</span>
+              <span class="bd-meta">
+                {!settings.isEmployee && settings.payType === 'daily' && isEarningsMode
+                  ? `${row.daysWorked} ${row.daysWorked === 1 ? 'day' : 'days'} worked · ${formatHours(row.rendered)}`
+                  : `${formatHours(row.rendered)} tracked`}
+                {row.carryOverIn !== 0 && isEarningsMode && (
+                  <span class={`bd-carry ${row.carryOverIn > 0 ? 'plus' : 'minus'}`}>
+                    {row.carryOverIn > 0 ? '+' : ''}₱{row.carryOverIn.toLocaleString('en-US', { maximumFractionDigits: 2 })} carry-over
+                  </span>
+                )}
+              </span>
+            </div>
+
+            {isEarningsMode ? (
+              <div class="bd-values">
+                <div class="bd-amount-group">
+                  <span class="bd-amount-label">{row.isAdjusted ? 'Received' : 'Expected'}</span>
+                  <span class={`bd-amount ${row.isAdjusted ? 'received' : ''}`}>
+                    ₱ {(row.isAdjusted ? row.actualReceived : row.totalExpected).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div class="bd-actions">
+                  {!row.isAdjusted && (
+                    <button type="button" class="bd-btn-received" data-amount={row.totalExpected.toFixed(2)}>Received</button>
+                  )}
+                  <button type="button" class="bd-btn-edit" data-amount={(row.isAdjusted ? row.actualReceived : row.totalExpected).toFixed(2)}>Edit</button>
+                </div>
+                <div class="bd-edit" style="display: none;">
+                  <span class="bd-currency">₱</span>
+                  <input type="number" step="0.01" class="bd-edit-input" value={(row.isAdjusted ? row.actualReceived : row.totalExpected).toFixed(2)} />
+                  <button type="button" class="bd-btn-save">Save</button>
+                  <button type="button" class="bd-btn-cancel">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div class="bd-values">
+                <div class="bd-amount-group">
+                  <span class="bd-amount-label">Rendered</span>
+                  <span class="bd-amount">{formatHours(row.rendered)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+        {periodRows.length === 0 && (
+          <div class="bd-empty">No logs recorded for the current period yet.</div>
+        )}
       </div>
     </div>
   </div>
@@ -595,31 +675,21 @@ if (!settings.isEmployee) {
         <div class="quick-stats">
           <div class="stat-tile">
             <div class="stat-head">
-              <span class="stat-label">This Week</span>
+              <span class="stat-label">Last 7 Days</span>
               <span class="stat-value">{formatHours(totalWeekHours)}</span>
             </div>
             <p class="stat-explain">
-              Logged on {weeklyChartData.filter(d => d.hours > 0).length} of the last 7 days · averaging {(totalWeekHours / 7).toFixed(1)}h/day this week.
+              A rolling window ending today — logged on {weeklyChartData.filter(d => d.hours > 0).length} of those 7 days, averaging {(totalWeekHours / 7).toFixed(1)}h/day. The chart below splits the month into fixed weeks instead.
             </p>
           </div>
 
           <div class="stat-tile">
             <div class="stat-head">
-              <span class="stat-label">Current Streak</span>
+              <span class="stat-label">Streak</span>
               <span class="stat-value">{currentStreak} {currentStreak === 1 ? 'day' : 'days'}</span>
             </div>
             <p class="stat-explain">
-              Consecutive days with at least one log, counting back from today. Longest streak on record: {longestStreak} {longestStreak === 1 ? 'day' : 'days'}.
-            </p>
-          </div>
-
-          <div class="stat-tile">
-            <div class="stat-head">
-              <span class="stat-label">Longest Streak</span>
-              <span class="stat-value">{longestStreak} {longestStreak === 1 ? 'day' : 'days'}</span>
-            </div>
-            <p class="stat-explain">
-              Longest unbroken run of logged days since you started on {activeStartDate}. You're currently on a {currentStreak}-day streak.
+              Consecutive days with at least one log, counting back from today. Your best run since {activeStartDate} was {longestStreak} {longestStreak === 1 ? 'day' : 'days'}.
             </p>
           </div>
 
@@ -633,8 +703,8 @@ if (!settings.isEmployee) {
             </p>
           </div>
 
-          {(settings.hasAllowance || settings.isEmployee) ? (
-            <div class="stat-tile">
+          {isEarningsMode ? (
+            <div class="stat-tile" data-tour="earnings-tile">
               <div class="stat-head">
                 <span class="stat-label">Expected Earnings</span>
                 <span class="stat-value">₱{quickEarnings.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
@@ -645,17 +715,18 @@ if (!settings.isEmployee) {
                   : settings.payType === 'daily'
                     ? `${quickEarningsDays} day(s) worked × ₱${settings.hourlyRate}/day.`
                     : `${formatHours(quickEarningsHours)} tracked × ₱${settings.hourlyRate}/hr.`}
-                {' '}<a href="/earnings" class="stat-explain-link">View full breakdown →</a>
+                {' '}<button type="button" class="stat-explain-link open-breakdown">View full breakdown →</button>
               </p>
             </div>
           ) : (
-            <div class="stat-tile">
+            <div class="stat-tile" data-tour="earnings-tile">
               <div class="stat-head">
                 <span class="stat-label">Best Day</span>
                 <span class="stat-value">{formatHours(bestDayHours)}</span>
               </div>
               <p class="stat-explain">
                 Your single best day out of {activeDaysCount} active day(s) logged so far.
+                {' '}<button type="button" class="stat-explain-link open-breakdown">Monthly breakdown →</button>
               </p>
             </div>
           )}
@@ -667,13 +738,20 @@ if (!settings.isEmployee) {
               <h2>Weekly <span class="accent">Activity</span></h2>
               <span class="chart-total">{formatHours(hoursThisMonth)} this month</span>
             </div>
-            <div class="chart-bars">
+            <div class="week-rows">
               {monthWeeksData.map(w => (
-                <div class="chart-bar-col" title={`${w.range}: ${w.hours.toFixed(1)}h`}>
-                  <div class="chart-bar-track">
-                    <div class="chart-bar-fill" style={`height: ${(w.hours / maxWeekHours) * 100}%`}></div>
+                <div class={`week-row ${w.isCurrent ? 'current' : ''}`}>
+                  <div class="week-range">
+                    <span>{w.label}</span>
+                    {w.isCurrent && <span class="week-now">this week</span>}
                   </div>
-                  <span class="chart-bar-label">{w.label}</span>
+                  <div class="week-track">
+                    <div class={`week-fill ${w.hours > 0 ? 'has-hours' : ''}`} style={`width: ${(w.hours / maxWeekHours) * 100}%`}></div>
+                  </div>
+                  <div class="week-figures">
+                    <span class="week-hours">{formatHours(w.hours)}</span>
+                    <span class="week-days">{w.days} {w.days === 1 ? 'day' : 'days'}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -767,6 +845,11 @@ if (!settings.isEmployee) {
       body: 'Total hours against your target, plus how much time is left and an estimated finish date based on your recent pace.',
     },
     {
+      target: '[data-tour="earnings-tile"]',
+      title: 'Earnings, without leaving the page',
+      body: 'This tile shows what your logged hours are worth. Open the full breakdown to see each pay period, mark a payout as received, or correct an amount — it all happens right here.',
+    },
+    {
       target: '.quick-stats',
       title: 'Quick stats',
       body: 'Your week, streaks, total logs and expected earnings — each tile spells out how its number was worked out, so nothing here is a black box.',
@@ -796,12 +879,7 @@ if (!settings.isEmployee) {
       title: 'Time Tracker',
       body: "Log or edit sessions by hand for days you forgot to clock in — attach a screenshot as proof so your coordinator can approve it.",
     },
-    {
-      target: '[data-tour="nav-earnings"]',
-      title: 'Earnings',
-      body: 'If your internship pays an allowance, this projects what you have earned per pay period from the hours you tracked.',
-    },
-    {
+        {
       target: '[data-tour="nav-dtr"]',
       title: 'DTR Sheet',
       body: 'Your Daily Time Record builds itself from tracked hours. Edit any cell like a spreadsheet, then print it or export it as a school-ready PDF form.',
@@ -873,6 +951,155 @@ if (!settings.isEmployee) {
     const newUrl = window.location.pathname;
     window.history.replaceState({}, '', newUrl);
   }
+
+  // Period breakdown modal. Saving a payout shifts the carry-over into every later period, so the
+  // rows are re-fetched from the server rather than patched here — the money math stays in one place.
+  (() => {
+    const modal = document.getElementById('breakdown-modal');
+    const list = document.getElementById('breakdown-list');
+    if (!modal || !list) return;
+
+    const peso = (n) => `₱ ${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const formatHours = (h) => {
+      const total = Math.round(h * 3600);
+      return `${String(Math.floor(total / 3600)).padStart(2, '0')}:${String(Math.floor((total % 3600) / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+    };
+
+    const open = () => { modal.style.display = 'flex'; document.body.style.overflow = 'hidden'; };
+    const close = () => { modal.style.display = 'none'; document.body.style.overflow = ''; };
+
+    document.querySelectorAll('.open-breakdown').forEach(btn => btn.addEventListener('click', open));
+    document.getElementById('breakdown-close')?.addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.style.display === 'flex') close();
+    });
+
+    async function refresh() {
+      const res = await fetch('/api/payouts');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const rows = data.rows.slice().reverse();
+      list.replaceChildren();
+
+      rows.forEach(row => {
+        const el = document.createElement('div');
+        el.className = 'bd-row';
+        el.dataset.label = row.label;
+
+        const amount = row.isAdjusted ? row.actualReceived : row.totalExpected;
+        const meta = !data.isEmployee && data.payType === 'daily' && data.isEarningsMode
+          ? `${row.daysWorked} ${row.daysWorked === 1 ? 'day' : 'days'} worked · ${formatHours(row.rendered)}`
+          : `${formatHours(row.rendered)} tracked`;
+
+        const main = document.createElement('div');
+        main.className = 'bd-main';
+        const label = document.createElement('span');
+        label.className = 'bd-label';
+        label.textContent = row.label;
+        const metaEl = document.createElement('span');
+        metaEl.className = 'bd-meta';
+        metaEl.textContent = meta;
+        if (row.carryOverIn !== 0 && data.isEarningsMode) {
+          const carry = document.createElement('span');
+          carry.className = `bd-carry ${row.carryOverIn > 0 ? 'plus' : 'minus'}`;
+          carry.textContent = `${row.carryOverIn > 0 ? '+' : ''}₱${Number(row.carryOverIn).toLocaleString('en-US', { maximumFractionDigits: 2 })} carry-over`;
+          metaEl.appendChild(carry);
+        }
+        main.append(label, metaEl);
+
+        const values = document.createElement('div');
+        values.className = 'bd-values';
+        values.innerHTML = data.isEarningsMode
+          ? `<div class="bd-amount-group">
+               <span class="bd-amount-label"></span>
+               <span class="bd-amount"></span>
+             </div>
+             <div class="bd-actions"></div>
+             <div class="bd-edit" style="display: none;">
+               <span class="bd-currency">₱</span>
+               <input type="number" step="0.01" class="bd-edit-input" />
+               <button type="button" class="bd-btn-save">Save</button>
+               <button type="button" class="bd-btn-cancel">Cancel</button>
+             </div>`
+          : `<div class="bd-amount-group">
+               <span class="bd-amount-label">Rendered</span>
+               <span class="bd-amount"></span>
+             </div>`;
+
+        if (data.isEarningsMode) {
+          values.querySelector('.bd-amount-label').textContent = row.isAdjusted ? 'Received' : 'Expected';
+          const amountEl = values.querySelector('.bd-amount');
+          amountEl.textContent = peso(amount);
+          amountEl.classList.toggle('received', row.isAdjusted);
+          values.querySelector('.bd-edit-input').value = Number(amount).toFixed(2);
+
+          const actions = values.querySelector('.bd-actions');
+          if (!row.isAdjusted) {
+            const received = document.createElement('button');
+            received.type = 'button';
+            received.className = 'bd-btn-received';
+            received.dataset.amount = Number(row.totalExpected).toFixed(2);
+            received.textContent = 'Received';
+            actions.appendChild(received);
+          }
+          const edit = document.createElement('button');
+          edit.type = 'button';
+          edit.className = 'bd-btn-edit';
+          edit.dataset.amount = Number(amount).toFixed(2);
+          edit.textContent = 'Edit';
+          actions.appendChild(edit);
+        } else {
+          values.querySelector('.bd-amount').textContent = formatHours(row.rendered);
+        }
+
+        el.append(main, values);
+        list.appendChild(el);
+      });
+
+      const total = data.rows.reduce((sum, r) => sum + r.calculated, 0);
+      const totalEl = document.getElementById('breakdown-total-value');
+      if (totalEl) totalEl.textContent = peso(total);
+    }
+
+    async function save(label, amount) {
+      const res = await fetch('/api/payouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ periodLabel: label, amountReceived: amount }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        window.showToast(data.error || 'Could not save that payout', 'error');
+        return;
+      }
+      await refresh();
+      window.showToast('Payout updated', 'success');
+    }
+
+    list.addEventListener('click', (e) => {
+      const row = e.target.closest('.bd-row');
+      if (!row) return;
+      const label = row.dataset.label;
+
+      if (e.target.closest('.bd-btn-received')) {
+        save(label, parseFloat(e.target.closest('.bd-btn-received').dataset.amount));
+      } else if (e.target.closest('.bd-btn-edit')) {
+        row.querySelector('.bd-amount-group').style.display = 'none';
+        row.querySelector('.bd-actions').style.display = 'none';
+        row.querySelector('.bd-edit').style.display = 'flex';
+        row.querySelector('.bd-edit-input').focus();
+      } else if (e.target.closest('.bd-btn-cancel')) {
+        row.querySelector('.bd-amount-group').style.display = '';
+        row.querySelector('.bd-actions').style.display = '';
+        row.querySelector('.bd-edit').style.display = 'none';
+      } else if (e.target.closest('.bd-btn-save')) {
+        const value = parseFloat(row.querySelector('.bd-edit-input').value);
+        if (Number.isFinite(value)) save(label, value);
+      }
+    });
+  })();
 
   // Handle visual loading state on form submissions
   document.addEventListener('submit', (e) => {
@@ -1139,16 +1366,108 @@ if (!settings.isEmployee) {
   .stat-value { font-size: 20px; font-weight: 800; color: var(--text-primary); }
   /* margin-top: auto keeps the divider lined up across tiles whose blurbs differ in length. */
   .stat-explain { margin: auto 0 0; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-size: 11px; line-height: 1.6; color: var(--text-secondary); }
-  .stat-explain-link { color: var(--ntv-orange); font-weight: 700; text-decoration: none; }
+  .stat-explain-link {
+    color: var(--ntv-orange); font-weight: 700; text-decoration: none;
+    background: none; border: none; padding: 0; font-family: inherit; font-size: inherit; cursor: pointer;
+  }
   .stat-explain-link:hover { text-decoration: underline; }
+
+  /* Period breakdown modal (replaces the old Earnings tab) */
+  .breakdown-modal-content { max-width: 640px !important; max-height: 86vh; display: flex; flex-direction: column; }
+  .breakdown-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .breakdown-header h3 { font-size: 19px; font-weight: 700; color: var(--text-primary); }
+  .breakdown-header .modal-subtitle { margin-bottom: 0; }
+  .breakdown-close {
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    width: 30px; height: 30px; border-radius: 8px; background: none; border: none;
+    color: var(--text-secondary); cursor: pointer; transition: all .2s;
+  }
+  .breakdown-close:hover { background: rgba(127,127,127,.12); color: var(--text-primary); }
+
+  .breakdown-total {
+    display: flex; align-items: center; justify-content: space-between;
+    margin: 18px 0 4px; padding: 12px 16px; border-radius: 12px;
+    background: rgba(237, 102, 33, 0.08); border: 1px solid rgba(237, 102, 33, 0.2);
+    font-size: 12px; font-weight: 700; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .breakdown-total strong { font-size: 18px; color: var(--ntv-orange); text-transform: none; letter-spacing: 0; }
+
+  .breakdown-list { margin-top: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .bd-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 16px; border-radius: 12px;
+    background: rgba(127,127,127,.05); border: 1px solid var(--border-subtle);
+  }
+  .bd-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .bd-label { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+  .bd-meta { font-size: 11px; color: var(--text-secondary); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .bd-carry { font-weight: 700; padding: 2px 7px; border-radius: 6px; }
+  .bd-carry.plus { color: #34d399; background: rgba(52,211,153,.12); }
+  .bd-carry.minus { color: #f87171; background: rgba(248,113,113,.12); }
+
+  .bd-values { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .bd-amount-group { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .bd-amount-label { font-size: 9.5px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .06em; }
+  .bd-amount { font-size: 15px; font-weight: 800; color: var(--text-primary); white-space: nowrap; }
+  .bd-amount.received { color: #34d399; }
+  .bd-actions { display: flex; gap: 6px; }
+  .bd-btn-received, .bd-btn-edit, .bd-btn-save, .bd-btn-cancel {
+    font-family: inherit; font-size: 11.5px; font-weight: 700; padding: 7px 12px;
+    border-radius: 8px; cursor: pointer; transition: all .2s; border: 1px solid transparent;
+  }
+  .bd-btn-received, .bd-btn-save { background: var(--ntv-gradient); color: #fff; }
+  .bd-btn-received:hover, .bd-btn-save:hover { filter: brightness(1.1); }
+  .bd-btn-edit, .bd-btn-cancel {
+    background: rgba(127,127,127,.1); border-color: var(--border-subtle); color: var(--text-primary);
+  }
+  .bd-btn-edit:hover, .bd-btn-cancel:hover { background: rgba(127,127,127,.18); }
+  .bd-edit { display: flex; align-items: center; gap: 6px; }
+  .bd-currency { font-size: 13px; font-weight: 700; color: var(--text-secondary); }
+  .bd-edit-input {
+    width: 110px; padding: 7px 10px; border-radius: 8px;
+    background: rgba(127,127,127,.08); border: 1px solid var(--border-subtle);
+    color: var(--text-primary); font-family: inherit; font-size: 13px; outline: none;
+  }
+  .bd-edit-input:focus { border-color: var(--ntv-orange); }
+  .bd-empty {
+    text-align: center; padding: 28px; color: var(--text-secondary); font-size: 13px; font-style: italic;
+    background: rgba(127,127,127,.03); border: 1px dashed var(--border-subtle); border-radius: 12px;
+  }
+
+  @media (max-width: 600px) {
+    .bd-row { flex-direction: column; align-items: stretch; gap: 12px; }
+    .bd-values { justify-content: space-between; }
+    .bd-amount-group { align-items: flex-start; }
+  }
 
   .weekly-chart-card { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 24px; padding: 24px; }
   .chart-total { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
-  .chart-bars { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; height: 140px; margin-top: 16px; }
-  .chart-bar-col { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 1; height: 100%; }
-  .chart-bar-track { width: 100%; max-width: 36px; height: 100%; display: flex; align-items: flex-end; background: rgba(255,255,255,0.03); border-radius: 8px; overflow: hidden; }
-  .chart-bar-fill { width: 100%; min-height: 2px; background: var(--ntv-gradient); border-radius: 8px; transition: height 0.6s cubic-bezier(0.16,1,0.3,1); }
-  .chart-bar-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+  /* Horizontal week rows: each names the dates it covers, so "which days is this?" never comes up. */
+  .week-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .week-row { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 14px; }
+  .week-range { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+  .week-row.current .week-range { color: var(--text-primary); }
+  .week-now {
+    font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--ntv-orange); background: rgba(237,102,33,.14); padding: 2px 6px; border-radius: 5px; white-space: nowrap;
+  }
+  .week-track { height: 10px; background: rgba(127,127,127,.08); border-radius: 5px; overflow: hidden; }
+  .week-fill {
+    height: 100%; border-radius: 5px;
+    background: var(--ntv-gradient); transition: width .6s cubic-bezier(0.16,1,0.3,1);
+  }
+  /* A week with no logs shows an empty track, not a stub of colour. */
+  .week-fill.has-hours { min-width: 3px; }
+  .week-row:not(.current) .week-fill { opacity: .65; }
+  .week-figures { display: flex; align-items: baseline; gap: 8px; justify-content: flex-end; min-width: 116px; }
+  .week-hours { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .week-days { font-size: 10.5px; color: var(--text-secondary); }
+
+  @media (max-width: 600px) {
+    .week-row { grid-template-columns: 96px 1fr; row-gap: 4px; }
+    .week-figures { grid-column: 2; justify-content: flex-start; min-width: 0; }
+  }
 
   .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
   .section-header h2 { font-size: 18px; font-weight: 600; color: #fff; }

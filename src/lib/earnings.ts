@@ -29,3 +29,47 @@ export function totalEarnings(settings: AppSettings, groups: GroupedEntry[]): nu
 export function totalDaysWorked(groups: GroupedEntry[]): number {
   return groups.reduce((sum, group) => sum + group.daysWorked, 0);
 }
+
+export interface PeriodRow {
+  label: string;
+  rendered: number;
+  daysWorked: number;
+  calculated: number;
+  totalExpected: number;
+  actualReceived: number;
+  carryOverIn: number;
+  carryOverOut: number;
+  isAdjusted: boolean;
+}
+
+// One row per pay period, oldest first, carrying any under/overpayment forward: whatever a period
+// was short by is added to what the next period expects.
+export function buildPeriodBreakdown(
+  settings: AppSettings,
+  groups: GroupedEntry[],
+  adjustments: Record<string, number>,
+): PeriodRow[] {
+  let carryOver = 0;
+
+  return groups.map(group => {
+    const calculated = periodEarnings(settings, group);
+    const totalExpected = calculated + carryOver;
+    const isAdjusted = adjustments[group.label] !== undefined;
+    const actualReceived = isAdjusted ? adjustments[group.label] : totalExpected;
+    const carryOverIn = carryOver;
+
+    carryOver = totalExpected - actualReceived;
+
+    return {
+      label: group.label,
+      rendered: group.totalSeconds / 3600,
+      daysWorked: group.daysWorked,
+      calculated,
+      totalExpected,
+      actualReceived,
+      carryOverIn,
+      carryOverOut: carryOver,
+      isAdjusted,
+    };
+  });
+}
