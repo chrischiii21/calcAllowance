@@ -130,10 +130,10 @@ const colGroup2Label = isStandardDayShift ? 'PM' : 'AFTER BREAK';
 // as needing manual input (you claimed you worked, but there's nothing logged); Absent/SL/VL are
 // expected to have no log by definition, so they just get a quiet informational badge.
 const overrides = await getOverridesForMonth(viewUserId, settings.isEmployee ?? false, month, year);
-const overridesByDay: Record<number, { status: string; isHalfDay: boolean }> = {};
+const overridesByDay: Record<number, { status: string; isHalfDay: boolean; reason: string | null }> = {};
 for (const o of overrides) {
   const d = parseInt(o.date.split('-')[2], 10);
-  overridesByDay[d] = { status: o.status, isHalfDay: o.isHalfDay };
+  overridesByDay[d] = { status: o.status, isHalfDay: o.isHalfDay, reason: o.reason };
 }
 const statusLabels: Record<string, string> = { absent: 'ABSENT', wfh: 'WFH', sl: 'SL', vl: 'VL', present: 'PRESENT' };
 const ACTIONABLE_STATUSES = new Set(['present', 'wfh']);
@@ -400,7 +400,7 @@ const totalRequiredHours = settings.isEmployee ? 0 : settings.targetHours;
                     <td class="date-col">
                       {day}
                       {hasOverride && (
-                        <span class={`dtr-status-badge status-${override.status}`} title={`Marked ${statusLabels[override.status] || override.status} in Attendance Chart`}>
+                        <span class={`dtr-status-badge status-${override.status}`} title={override.reason ? `${statusLabels[override.status] || override.status}: ${override.reason}` : `Marked ${statusLabels[override.status] || override.status} in Attendance Chart`}>
                           {statusLabels[override.status] || override.status}
                         </span>
                       )}
@@ -467,7 +467,7 @@ const totalRequiredHours = settings.isEmployee ? 0 : settings.targetHours;
                         : needsInput
                         ? <span class="no-log-hint">No log — input needed</span>
                         : isInformational
-                        ? <span class="attendance-note-hint">No log expected</span>
+                        ? <span class="attendance-note-hint">{override?.reason || "No log expected"}</span>
                         : ""}
                     </td>
                   </tr>

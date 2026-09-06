@@ -22,7 +22,11 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   try {
-    const { date, endDate, status, isHalfDay } = await request.json();
+    const { date, endDate, status, isHalfDay, reason } = await request.json();
+
+    // A reason is free text the person types about their own day; cap it so a stray paste can't
+    // become a novel in the DTR.
+    const trimmedReason = typeof reason === 'string' ? reason.trim().slice(0, 200) : '';
 
     if (!date || !status) {
       return new Response(JSON.stringify({ error: 'Missing required parameters' }), {
@@ -75,14 +79,14 @@ export const POST: APIRoute = async ({ request }) => {
 
       for (const d of datesToApply) {
         if (status === 'clear') await clearOverride(session.id, isEmployee, d);
-        else await saveOverride(session.id, isEmployee, d, status, !!isHalfDay);
+        else await saveOverride(session.id, isEmployee, d, status, !!isHalfDay, trimmedReason);
       }
 
       await addSyncLog({
         userId: session.id,
         type: 'Settings',
         status: 'Success',
-        details: `Attendance ${date} to ${endDate} marked ${status} (${datesToApply.length} day(s)${skippedCount ? `, ${skippedCount} non-working day(s) skipped` : ''})`,
+        details: `Attendance ${date} to ${endDate} marked ${status} (${datesToApply.length} day(s)${skippedCount ? `, ${skippedCount} non-working day(s) skipped` : ''})${trimmedReason ? ` — ${trimmedReason}` : ''}`,
       });
 
       return new Response(JSON.stringify({ success: true, bulk: true, count: datesToApply.length, skipped: skippedCount }), {
@@ -95,7 +99,7 @@ export const POST: APIRoute = async ({ request }) => {
     if (status === 'clear') {
       await clearOverride(session.id, isEmployee, date);
     } else {
-      await saveOverride(session.id, isEmployee, date, status, !!isHalfDay);
+      await saveOverride(session.id, isEmployee, date, status, !!isHalfDay, trimmedReason);
     }
 
     // Recompute the day's effective status (needed for 'clear', which reverts to auto/calendar/unmarked)
@@ -126,7 +130,7 @@ export const POST: APIRoute = async ({ request }) => {
       userId: session.id,
       type: 'Settings',
       status: 'Success',
-      details: `Attendance ${date} marked ${status}`,
+      details: `Attendance ${date} marked ${status}${trimmedReason ? ` — ${trimmedReason}` : ''}`,
     });
 
     return new Response(JSON.stringify({ success: true, day: dayResult }), {

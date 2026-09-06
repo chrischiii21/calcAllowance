@@ -7,6 +7,7 @@ export interface AttendanceOverride {
   date: string; // YYYY-MM-DD
   status: AttendanceStatus;
   isHalfDay: boolean;
+  reason: string | null; // why the day was marked this way — carried onto the DTR
 }
 
 export interface AttendanceConfig {
@@ -36,6 +37,7 @@ export interface DayAttendance {
   status: EffectiveStatus;
   isHalfDay: boolean;
   isUndertime: boolean;
+  reason: string | null;
   source: 'override' | 'auto' | 'calendar' | 'none';
 }
 
@@ -164,7 +166,7 @@ export async function getOverridesInRange(userId: string, isEmployee: boolean, s
 
   if (error) throw error;
 
-  return (data || []).map(o => ({ date: o.date, status: o.status, isHalfDay: o.is_half_day }));
+  return (data || []).map(o => ({ date: o.date, status: o.status, isHalfDay: o.is_half_day, reason: o.reason ?? null }));
 }
 
 export async function getOverridesForMonth(userId: string, isEmployee: boolean, month: number, year: number): Promise<AttendanceOverride[]> {
@@ -174,7 +176,7 @@ export async function getOverridesForMonth(userId: string, isEmployee: boolean, 
   return getOverridesInRange(userId, isEmployee, startDate, endDate);
 }
 
-export async function saveOverride(userId: string, isEmployee: boolean, date: string, status: AttendanceStatus, isHalfDay: boolean): Promise<AttendanceOverride> {
+export async function saveOverride(userId: string, isEmployee: boolean, date: string, status: AttendanceStatus, isHalfDay: boolean, reason: string | null = null): Promise<AttendanceOverride> {
   const { data, error } = await supabase
     .from('attendance_overrides')
     .upsert({
@@ -183,13 +185,14 @@ export async function saveOverride(userId: string, isEmployee: boolean, date: st
       date,
       status,
       is_half_day: isHalfDay,
+      reason: reason || null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id,is_employee,date' })
     .select()
     .single();
 
   if (error) throw error;
-  return { date: data.date, status: data.status, isHalfDay: data.is_half_day };
+  return { date: data.date, status: data.status, isHalfDay: data.is_half_day, reason: data.reason ?? null };
 }
 
 export async function clearOverride(userId: string, isEmployee: boolean, date: string): Promise<void> {
@@ -231,6 +234,7 @@ export function computeMonthlyAttendance(
     let isHalfDay: boolean;
     let isUndertime: boolean;
     let source: DayAttendance['source'];
+    const reason = override?.reason ?? null;
 
     if (override) {
       status = override.status;
@@ -266,6 +270,7 @@ export function computeMonthlyAttendance(
       status,
       isHalfDay,
       isUndertime,
+      reason,
       source,
     });
   }

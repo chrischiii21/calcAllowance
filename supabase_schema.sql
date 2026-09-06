@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS public.attendance_overrides (
     date DATE NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('present', 'absent', 'wfh', 'sl', 'vl')),
     is_half_day BOOLEAN NOT NULL DEFAULT FALSE,
+    reason TEXT, -- why the day was marked this way; shown on the calendar and the DTR
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE (user_id, is_employee, date)
 );

@@ -20,6 +20,15 @@ ALTER TABLE public.active_timers ADD PRIMARY KEY (user_id, is_employee);
 
 
 -- --------------------------------------------------------------------------
+-- 1b. attendance_overrides: a reason for the day  (REQUIRED for the new feature)
+-- --------------------------------------------------------------------------
+-- Marking a day Absent / SL / VL / WFH can now carry a short note explaining why, shown on the
+-- calendar cell and on the DTR row. Without this column those saves fail.
+
+ALTER TABLE public.attendance_overrides ADD COLUMN IF NOT EXISTS reason TEXT;
+
+
+-- --------------------------------------------------------------------------
 -- 2. Indexes for the queries the app actually runs
 -- --------------------------------------------------------------------------
 -- Hours are always read as "this user, this mode, since this date"; the coordinator roster reads
