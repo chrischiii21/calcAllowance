@@ -107,6 +107,25 @@ const monthName = new Date(year, month - 1)
 
 const leadingBlanks = new Date(year, month - 1, 1).getDay();
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const STATUS_LABELS: Record<string, string> = {
+  present: 'Present', absent: 'Absent', wfh: 'WFH', sl: 'Sick Leave', vl: 'Vacation Leave',
+};
+const shortMonth = new Date(year, month - 1).toLocaleDateString('en-US', { month: 'short' });
+
+// Consecutive days sharing a status and reason are one absence, not five separate rows — so a
+// three-day sick leave reads as "Sep 3–5" instead of repeating the same line three times.
+const reasonSpans: { from: number; to: number; status: string; reason: string; days: number }[] = [];
+for (const d of days) {
+  if (!d.reason) continue;
+  const last = reasonSpans[reasonSpans.length - 1];
+  if (last && last.status === d.status && last.reason === d.reason && d.day === last.to + 1) {
+    last.to = d.day;
+    last.days++;
+  } else {
+    reasonSpans.push({ from: d.day, to: d.day, status: d.status, reason: d.reason, days: 1 });
+  }
+}
 ---
 
 <Layout title="Attendance Chart">
@@ -212,13 +231,32 @@ const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
               title={d.reason || undefined}
             >
               <span class="day-num">{d.day}</span>
-              {d.reason && <span class="reason-dot" aria-label="Has a reason noted"></span>}
+              {d.reason && <span class="cell-reason">{d.reason}</span>}
               {d.isHoliday && <span class="holiday-dot" title={d.holidayLabel || 'Holiday'}></span>}
               {d.isUndertime && <span class="undertime-badge" title="Undertime">UT</span>}
               {d.totalSeconds > 0 && <span class="day-hours">{(d.totalSeconds / 3600).toFixed(1)}h</span>}
             </div>
           ))}
         </div>
+
+        {reasonSpans.length > 0 && (
+          <section class="reason-summary">
+            <h2 class="reason-summary-title">Why these days were marked</h2>
+            <ul class="reason-list">
+              {reasonSpans.map(span => (
+                <li class="reason-item">
+                  <i class={`swatch ${span.status}`}></i>
+                  <span class="reason-dates">
+                    {shortMonth} {span.from}{span.to !== span.from ? `–${span.to}` : ''}
+                    {span.days > 1 && <span class="reason-daycount">{span.days} days</span>}
+                  </span>
+                  <span class="reason-status">{STATUS_LABELS[span.status] || span.status}</span>
+                  <span class="reason-text">{span.reason}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
     </main>
   </div>
@@ -443,13 +481,13 @@ const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
       if (day.reason) cell.title = day.reason;
       else cell.removeAttribute('title');
 
-      cell.querySelectorAll('.day-hours, .holiday-dot, .undertime-badge, .reason-dot').forEach(el => el.remove());
+      cell.querySelectorAll('.day-hours, .holiday-dot, .undertime-badge, .cell-reason').forEach(el => el.remove());
       const dayNum = cell.querySelector('.day-num');
       if (day.reason) {
-        const mark = document.createElement('span');
-        mark.className = 'reason-dot';
-        mark.setAttribute('aria-label', 'Has a reason noted');
-        dayNum.after(mark);
+        const note = document.createElement('span');
+        note.className = 'cell-reason';
+        note.textContent = day.reason;
+        dayNum.after(note);
       }
       if (day.isHoliday) {
         const dot = document.createElement('span');
@@ -698,10 +736,38 @@ const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   .day-num { font-size: 13px; font-weight: 700; }
   .day-hours { font-size: 10px; opacity: 0.85; align-self: flex-end; }
   .holiday-dot { position: absolute; top: 6px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  /* Marks a day that carries a written reason — the text itself is the cell's tooltip. */
-  .reason-dot {
-    position: absolute; bottom: 6px; left: 7px; width: 12px; height: 3px;
-    border-radius: 2px; background: currentColor; opacity: .75;
+  /* The reason reads straight off the cell — a hover tooltip is no use on a phone. */
+  .cell-reason {
+    font-size: 9px; line-height: 1.25; opacity: .9; margin-top: 2px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; word-break: break-word;
+  }
+
+  .reason-summary {
+    max-width: 900px; margin: 20px auto 0; padding: 18px 20px;
+    background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 14px;
+  }
+  .reason-summary-title {
+    font-size: 13px; font-weight: 700; color: var(--text-primary);
+    margin-bottom: 14px; letter-spacing: .01em;
+  }
+  .reason-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .reason-item {
+    display: grid; grid-template-columns: 12px 130px 92px 1fr; align-items: baseline; gap: 12px;
+    font-size: 12.5px; color: var(--text-secondary);
+  }
+  .reason-item .swatch { align-self: center; }
+  .reason-dates { display: flex; align-items: baseline; gap: 7px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
+  .reason-daycount {
+    font-size: 9.5px; font-weight: 700; color: var(--text-secondary);
+    background: rgba(127,127,127,.12); padding: 2px 6px; border-radius: 5px;
+  }
+  .reason-status { font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+  .reason-text { color: var(--text-primary); }
+
+  @media (max-width: 700px) {
+    .reason-item { grid-template-columns: 12px 1fr; row-gap: 3px; }
+    .reason-status, .reason-text { grid-column: 2; }
   }
   .undertime-badge {
     position: absolute; bottom: 6px; left: 8px; font-size: 8px; font-weight: 800;
