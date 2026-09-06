@@ -114,6 +114,9 @@
 <script is:inline>
   (function () {
     const SEEN_PREFIX = 'internflow_tour_';
+    // Set once, when an account finishes setup. While it's on, each page runs its own walkthrough
+    // the first time that page is opened — so a new user is guided everywhere, and nobody else is.
+    const ONBOARDING_KEY = 'internflow_onboarding';
     const GAP = 14;
     const PAD = 8;
 
@@ -159,6 +162,20 @@
         } catch (e) {}
       },
 
+      beginOnboarding() {
+        try {
+          localStorage.setItem(ONBOARDING_KEY, 'active');
+        } catch (e) {}
+      },
+
+      isOnboarding() {
+        try {
+          return localStorage.getItem(ONBOARDING_KEY) === 'active';
+        } catch (e) {
+          return false;
+        }
+      },
+
       // Steps whose target is missing or hidden (role-specific nav items, widgets that opted out)
       // are dropped so the walkthrough never spotlights empty space.
       resolveSteps() {
@@ -186,6 +203,19 @@
         return this.start();
       },
 
+      // What every page except the Dashboard calls on load: run this page's walkthrough once for a
+      // user still being onboarded, or on demand via ?tour=1. The delay lets widgets that fill
+      // themselves in from a fetch (the header timer, the sync badge) render their targets first.
+      autoStart(delay) {
+        const forced = new URLSearchParams(window.location.search).get('tour') === '1';
+        if (!forced && !this.isOnboarding()) return;
+        if (forced) window.history.replaceState({}, '', window.location.pathname);
+        setTimeout(() => {
+          if (forced) this.start();
+          else this.startIfNew();
+        }, delay || 600);
+      },
+
       show() {
         const step = this.steps[this.index];
         const target = document.querySelector(step.target);
@@ -205,6 +235,9 @@
           target.scrollIntoView({ block: 'center', inline: 'nearest' });
         }
 
+        // Position now so the spotlight is never left un-placed if the frame callback is deferred
+        // (background tab), then again next frame to pick up whatever the scroll settled on.
+        this.position();
         requestAnimationFrame(() => this.position());
       },
 

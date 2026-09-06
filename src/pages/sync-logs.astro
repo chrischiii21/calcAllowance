@@ -143,3 +143,15 @@ const { data: syncLogs } = await supabase
   .status-pill.warning { background: rgba(251,191,36,.1); color: #fbbf24; border: 1px solid rgba(251,191,36,.2); }
   .empty-state { text-align: center; padding: 40px !important; color: var(--text-secondary); font-style: italic; }
 </style>
+
+<script is:inline>
+  // First-visit walkthrough for this page; replayable any time from the header's tour button.
+  window.InternFlowTour?.register('sync-logs', [
+    {
+      target: '#logs-content',
+      title: 'Sync Logs',
+      body: 'A running record of every clock action and sync, with its result. When a session seems missing from your hours, this is where you confirm whether it was saved.',
+    },
+  ]);
+  window.InternFlowTour?.autoStart();
+</script>

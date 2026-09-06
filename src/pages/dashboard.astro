@@ -593,69 +593,69 @@ if (!settings.isEmployee) {
         </div>
 
         <div class="quick-stats">
-          <details class="stat-tile">
-            <summary>
+          <div class="stat-tile">
+            <div class="stat-head">
               <span class="stat-label">This Week</span>
               <span class="stat-value">{formatHours(totalWeekHours)}</span>
-            </summary>
+            </div>
             <p class="stat-explain">
               Logged on {weeklyChartData.filter(d => d.hours > 0).length} of the last 7 days · averaging {(totalWeekHours / 7).toFixed(1)}h/day this week.
             </p>
-          </details>
+          </div>
 
-          <details class="stat-tile">
-            <summary>
+          <div class="stat-tile">
+            <div class="stat-head">
               <span class="stat-label">Current Streak</span>
               <span class="stat-value">{currentStreak} {currentStreak === 1 ? 'day' : 'days'}</span>
-            </summary>
+            </div>
             <p class="stat-explain">
               Consecutive days with at least one log, counting back from today. Longest streak on record: {longestStreak} {longestStreak === 1 ? 'day' : 'days'}.
             </p>
-          </details>
+          </div>
 
-          <details class="stat-tile">
-            <summary>
+          <div class="stat-tile">
+            <div class="stat-head">
               <span class="stat-label">Longest Streak</span>
               <span class="stat-value">{longestStreak} {longestStreak === 1 ? 'day' : 'days'}</span>
-            </summary>
+            </div>
             <p class="stat-explain">
               Longest unbroken run of logged days since you started on {activeStartDate}. You're currently on a {currentStreak}-day streak.
             </p>
-          </details>
+          </div>
 
-          <details class="stat-tile">
-            <summary>
+          <div class="stat-tile">
+            <div class="stat-head">
               <span class="stat-label">Total Logs</span>
               <span class="stat-value">{allRawEntries.length}</span>
-            </summary>
+            </div>
             <p class="stat-explain">
               {allRawEntries.length} time entries recorded since {activeStartDate}, across {activeDaysCount} active days — combines synced sessions and manual entries.
             </p>
-          </details>
+          </div>
 
           {(settings.hasAllowance || settings.isEmployee) ? (
-            <details class="stat-tile">
-              <summary>
+            <div class="stat-tile">
+              <div class="stat-head">
                 <span class="stat-label">Expected Earnings</span>
                 <span class="stat-value">₱{quickEarnings.toLocaleString('en-US', { maximumFractionDigits: 0 })}</span>
-              </summary>
+              </div>
               <p class="stat-explain">
                 {settings.isEmployee
                   ? `${quickEarningsPeriods} pay period(s) × ₱${quickEarningsRate.toLocaleString()} on your ${activePaySchedule} schedule.`
                   : `${formatHours(renderedHours)} tracked × ₱${settings.hourlyRate}/hr.`}
                 {' '}<a href="/earnings" class="stat-explain-link">View full breakdown →</a>
               </p>
-            </details>
+            </div>
           ) : (
-            <details class="stat-tile">
-              <summary>
+            <div class="stat-tile">
+              <div class="stat-head">
                 <span class="stat-label">Best Day</span>
                 <span class="stat-value">{formatHours(bestDayHours)}</span>
-              </summary>
+              </div>
               <p class="stat-explain">
                 Your single best day out of {activeDaysCount} active day(s) logged so far.
               </p>
-            </details>
+            </div>
           )}
         </div>
 
@@ -767,7 +767,7 @@ if (!settings.isEmployee) {
     {
       target: '.quick-stats',
       title: 'Quick stats',
-      body: 'Tap any tile to expand it — each one explains how its number was calculated, so nothing here is a black box.',
+      body: 'Your week, streaks, total logs and expected earnings — each tile spells out how its number was worked out, so nothing here is a black box.',
     },
     {
       target: '.weekly-chart-card',
@@ -790,14 +790,19 @@ if (!settings.isEmployee) {
       body: 'This badge says where your hours come from. Green "Clockify Synced" means Clockify sessions are pulled in automatically and combined with what you log here. Orange "Internal Timer" means only this timer and your manual entries count. Tap it to switch the integration on or off.',
     },
     {
+      target: '[data-tour="nav-sync-logs"]',
+      title: 'Sync Logs',
+      body: 'A running record of every sync and clock action, so you can confirm a session was actually saved.',
+    },
+    {
       target: '[data-tour="nav-tracker"]',
       title: 'Time Tracker',
       body: "Log or edit sessions by hand for days you forgot to clock in — attach a screenshot as proof so your coordinator can approve it.",
     },
     {
-      target: '[data-tour="nav-sync-logs"]',
-      title: 'Sync Logs',
-      body: 'A running record of every sync and clock action, so you can confirm a session was actually saved.',
+      target: '[data-tour="nav-earnings"]',
+      title: 'Earnings',
+      body: 'If your internship pays an allowance, this projects what you have earned per pay period from the hours you tracked.',
     },
     {
       target: '[data-tour="nav-dtr"]',
@@ -808,11 +813,6 @@ if (!settings.isEmployee) {
       target: '[data-tour="nav-attendance"]',
       title: 'Attendance Chart',
       body: 'Mark each day Present, WFH, Absent, Sick or Vacation. Days you mark as worked but never logged get flagged on your DTR.',
-    },
-    {
-      target: '[data-tour="nav-earnings"]',
-      title: 'Earnings',
-      body: 'If your internship pays an allowance, this projects what you have earned per pay period from the hours you tracked.',
     },
     {
       target: '[data-tour="nav-settings"]',
@@ -847,9 +847,14 @@ if (!settings.isEmployee) {
     startTour(false);
   });
 
+  // A brand-new account (straight out of the setup wizard) enters onboarding mode, which is what
+  // makes every other page introduce itself on first visit too. Existing users are never
+  // interrupted — they replay any page's walkthrough from the header's tour button.
+  if (isFirstLogin) window.InternFlowTour?.beginOnboarding();
+
   if (params.get('tour') === '1') {
     startTour(true);
-  } else if (!showedIntroModal) {
+  } else if (!showedIntroModal && window.InternFlowTour?.isOnboarding()) {
     startTour(false);
   }
 
@@ -1129,16 +1134,14 @@ if (!settings.isEmployee) {
   .hero-substat-label { font-size: 10px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
   .hero-substat-value { font-size: 16px; font-weight: 800; color: var(--text-primary); }
 
-  .quick-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
-  .stat-tile { position: relative; background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 16px 18px; transition: all 0.2s; }
+  .quick-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 16px; margin-bottom: 24px; align-items: stretch; }
+  .stat-tile { display: flex; flex-direction: column; background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 16px 18px; transition: all 0.2s; }
   .stat-tile:hover { border-color: rgba(237, 102, 33, 0.3); }
-  .stat-tile summary { display: flex; flex-direction: column; gap: 6px; cursor: pointer; list-style: none; padding-right: 20px; }
-  .stat-tile summary::-webkit-details-marker { display: none; }
-  .stat-tile summary::after { content: '▾'; position: absolute; top: 16px; right: 16px; font-size: 10px; color: var(--text-secondary); transition: transform 0.2s; }
-  .stat-tile[open] summary::after { transform: rotate(180deg); }
+  .stat-head { display: flex; flex-direction: column; gap: 6px; }
   .stat-label { font-size: 10px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
   .stat-value { font-size: 20px; font-weight: 800; color: var(--text-primary); }
-  .stat-explain { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 11px; line-height: 1.6; color: var(--text-secondary); }
+  /* margin-top: auto keeps the divider lined up across tiles whose blurbs differ in length. */
+  .stat-explain { margin: auto 0 0; padding-top: 12px; border-top: 1px solid var(--border-subtle); font-size: 11px; line-height: 1.6; color: var(--text-secondary); }
   .stat-explain-link { color: var(--ntv-orange); font-weight: 700; text-decoration: none; }
   .stat-explain-link:hover { text-decoration: underline; }
 

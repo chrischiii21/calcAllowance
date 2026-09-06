@@ -65,7 +65,7 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
           <!-- Student Specific Sections -->
           {settings.role === 'student' && (
             <>
-              <section class="settings-card">
+              <section class="settings-card" data-tour="settings-config">
                 <h2 class="card-title">{settings.isEmployee ? "Employment & Tracker Configuration" : "Internship Configuration"}</h2>
                 <form action="/api/settings" method="POST" class="settings-form">
                   <input type="hidden" name="setupComplete" value="true" />
@@ -388,7 +388,7 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
                 </script>
               </section>
 
-              <section class="settings-card">
+              <section class="settings-card" data-tour="settings-coordinator">
                 <h2 class="card-title">Coordinator Connection</h2>
                 
                 {settings.coordinatorId ? (
@@ -474,7 +474,7 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
 
           <!-- Integration Section (Students Only) -->
           {settings.role === 'student' && (
-            <section class="settings-card">
+            <section class="settings-card" data-tour="settings-clockify">
               <h2 class="card-title">Clockify Integration</h2>
               <div class="integration-status">
                 <div class={`status-badge ${isClockifySet && settings.clockifyEnabled ? 'connected' : 'disconnected'}`}>
@@ -520,7 +520,7 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
           )}
 
           <!-- Danger Zone -->
-          <section class="settings-card danger">
+          <section class="settings-card danger" data-tour="settings-danger">
             <h2 class="card-title">Danger Zone</h2>
             <div class="danger-item">
               <div class="danger-info">
@@ -1201,3 +1201,35 @@ const displayPaySchedule = settings.isEmployee ? (settings.employeePaySchedule |
     color: #fff;
   }
 </style>
+
+<script is:inline>
+  // First-visit walkthrough for this page; replayable any time from the header's tour button.
+  window.InternFlowTour?.register('settings', [
+    {
+      target: '[data-tour="settings-config"]',
+      title: 'Your programme details',
+      body: 'Target hours, start date, company, supervisor and pay rate. These fill in the header of your DTR, so keep them accurate before you export anything.',
+    },
+    {
+      target: '#shift-config-card',
+      title: 'Work shift',
+      body: 'Tell the app whether you work a day shift or a mid/night shift. It decides how your punches are split into in/out pairs on the DTR.',
+    },
+    {
+      target: '[data-tour="settings-coordinator"]',
+      title: 'Coordinator connection',
+      body: "Paste your coordinator's invite code here to appear on their roster. It's optional — everything works without one.",
+    },
+    {
+      target: '[data-tour="settings-clockify"]',
+      title: 'Clockify integration',
+      body: 'Switch syncing on or off. With it on, Clockify sessions are pulled in and combined with the built-in timer; with it off, only the Time In/Out timer and your manual entries count.',
+    },
+    {
+      target: '[data-tour="settings-danger"]',
+      title: 'Danger zone',
+      body: 'Sign out of every device, or delete your account and all of its data. Deletion cannot be undone.',
+    },
+  ]);
+  window.InternFlowTour?.autoStart();
+</script>

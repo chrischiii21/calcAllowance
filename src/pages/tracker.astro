@@ -3001,3 +3001,30 @@ const formatBreakDuration = (minutes: number): string => {
     color: white;
   }
 </style>
+
+<script is:inline>
+  // First-visit walkthrough for this page; replayable any time from the header's tour button.
+  window.InternFlowTour?.register('tracker', [
+    {
+      target: '.history-column',
+      title: 'Activity Logs',
+      body: 'Every session that counts toward your hours — synced Clockify sessions and manual entries side by side. Click a row to see its details and any proof photos attached to it.',
+    },
+    {
+      target: '.history-header-filters',
+      title: 'Narrow it down',
+      body: 'Filter by source or date range when you need to check what a specific week actually contains, or to find one session out of hundreds.',
+    },
+    {
+      target: '#manual-add-box',
+      title: 'Log a session by hand',
+      body: "Forgot to clock in? Add the session here — description, date, start and end time. Attach a screenshot as proof so your coordinator can approve it.",
+    },
+    {
+      target: '.stats-box',
+      title: 'Total rendered',
+      body: 'Your running total from every source combined — the same number the Dashboard and your DTR are built from.',
+    },
+  ]);
+  window.InternFlowTour?.autoStart();
+</script>

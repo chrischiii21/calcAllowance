@@ -886,6 +886,7 @@ const totalRequiredHours = settings.isEmployee ? 0 : settings.targetHours;
       body: "Same month's entries, re-laid out on a formal black-and-white practicum form with certification and signature blocks. Fill in your school details once and they're remembered for next time.",
     },
   ]);
+  window.InternFlowTour?.autoStart();
 
   // Excel-like DTR Edit and Navigation Logic
   const dtrSheet = document.getElementById("dtr-sheet");

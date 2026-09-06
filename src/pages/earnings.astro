@@ -371,3 +371,25 @@ const isEarningsMode = settings.hasAllowance || settings.isEmployee;
     #portal-main { margin-left: 0; padding: 20px; }
   }
 </style>
+
+<script is:inline>
+  // First-visit walkthrough for this page; replayable any time from the header's tour button.
+  window.InternFlowTour?.register('earnings', [
+    {
+      target: '.page-header',
+      title: 'Earnings',
+      body: 'What your logged hours are worth, split into the pay periods your schedule defines — weekly, semi-monthly or monthly.',
+    },
+    {
+      target: '.earnings-breakdown',
+      title: 'Period by period',
+      body: 'Each row shows the hours in that period and the amount they add up to, so you can check a payout against your own records.',
+    },
+    {
+      target: '.btn-received',
+      title: 'Mark a payout as received',
+      body: "Confirm a period once you've actually been paid, so pending and settled amounts stay separate.",
+    },
+  ]);
+  window.InternFlowTour?.autoStart();
+</script>

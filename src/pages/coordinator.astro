@@ -278,11 +278,6 @@ if (selectedStatus === 'completed') {
       body: 'Every linked intern with their hours, progress and agency. Filter by section, agency or status, and open any student’s DTR from here.',
     },
     {
-      target: '[data-tour="nav-sections"]',
-      title: 'Manage Sections',
-      body: 'Create sections and share their invite codes — a student who enters your code in Settings shows up on this roster automatically.',
-    },
-    {
       target: '[data-tour="nav-dtr"]',
       title: 'Student DTRs',
       body: 'Open any intern’s Daily Time Record, month by month, and correct entries before you endorse them.',
@@ -291,6 +286,16 @@ if (selectedStatus === 'completed') {
       target: '[data-tour="nav-attendance"]',
       title: 'Attendance Chart',
       body: 'The per-day attendance calendar for the student you are viewing — present, WFH, absent, sick and vacation days.',
+    },
+    {
+      target: '[data-tour="nav-sections"]',
+      title: 'Manage Sections',
+      body: 'Create sections and share their invite codes — a student who enters your code in Settings shows up on this roster automatically.',
+    },
+    {
+      target: '[data-tour="nav-settings"]',
+      title: 'Settings',
+      body: 'Your own account details and preferences, plus the option to delete your account and data.',
     },
     {
       target: '[data-tour="tour-button"]',
@@ -314,9 +319,13 @@ if (selectedStatus === 'completed') {
     startTour(false);
   });
 
+  // New accounts enter onboarding mode so every page introduces itself once; existing users are
+  // never interrupted and replay walkthroughs from the header tour button.
+  if (isFirstLogin) window.InternFlowTour?.beginOnboarding();
+
   if (params.get('tour') === '1') {
     startTour(true);
-  } else if (!showedIntroModal) {
+  } else if (!showedIntroModal && window.InternFlowTour?.isOnboarding()) {
     startTour(false);
   }
 

@@ -1047,3 +1047,25 @@ See you there!`;
     });
   });
 </script>
+
+<script is:inline>
+  // First-visit walkthrough for this page; replayable any time from the header's tour button.
+  window.InternFlowTour?.register('sections', [
+    {
+      target: '.add-section-form',
+      title: 'Create a section',
+      body: 'Each section gets its own invite code. Name them however your school groups interns — by class, term or agency.',
+    },
+    {
+      target: '.invite-code-box',
+      title: 'Share the invite code',
+      body: 'Copy the code (or the whole invite message) and send it to your interns. Once they paste it into their Settings, they appear on your roster automatically.',
+    },
+    {
+      target: '.sections-grid',
+      title: 'Your sections',
+      body: 'Open any section to see its roster, each student’s progress, and their logs.',
+    },
+  ]);
+  window.InternFlowTour?.autoStart();
+</script>

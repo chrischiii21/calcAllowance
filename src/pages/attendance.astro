@@ -861,3 +861,30 @@ const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     .day-hours { display: none; }
   }
 </style>
+
+<script is:inline>
+  // First-visit walkthrough for this page; replayable any time from the header's tour button.
+  window.InternFlowTour?.register('attendance', [
+    {
+      target: '.calendar-wrapper',
+      title: 'Your attendance month',
+      body: 'Click any day to mark it Present, WFH, Absent, Sick or Vacation. Days with logged time already show their hours.',
+    },
+    {
+      target: '.legend',
+      title: 'What the colours mean',
+      body: 'Each status has its own colour here and on your DTR, so a glance tells you how the month went.',
+    },
+    {
+      target: '.actions-bar',
+      title: 'Switch month or year',
+      body: 'Move between periods here. The DTR Sheet reads the same markings, so a day you flag as worked but never logged gets called out there.',
+    },
+    {
+      target: '#config-btn',
+      title: 'Calendar setup',
+      body: 'Set which days count as working days and add holidays, so non-working days are not counted against your attendance.',
+    },
+  ]);
+  window.InternFlowTour?.autoStart();
+</script>
