@@ -1,5 +1,9 @@
 {
   "appId": "com.internflow.app",
   "appName": "InternFlow",
-  "webDir": "dist"
+  "webDir": "dist",
+  "server": {
+    "url": "https://internship-tracker-self.vercel.app",
+    "cleartext": false
+  }
 }
