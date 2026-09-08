@@ -5,9 +5,9 @@ import Sidebar from '../components/Sidebar.astro';
 import { getSession } from '../lib/auth';
 import { parse } from 'cookie';
 import { getAppSettings, DEFAULT_SETTINGS } from '../lib/settings';
-import { getTrackedEntries } from '../lib/entries';
+import { getTrackedEntries, getActiveTimer } from '../lib/entries';
 import { getStudentProgress } from '../lib/clockify';
-import { formatHMS, formatHours } from '../lib/utils';
+import { formatHMS, formatHours, manilaDate } from '../lib/utils';
 import { groupEntries } from '../lib/grouping';
 import { totalEarnings, totalDaysWorked, buildPeriodBreakdown } from '../lib/earnings';
 import { getPayoutAdjustments } from '../lib/payouts';
@@ -21,7 +21,7 @@ if (!user) {
 }
 
 const settings = await getAppSettings(user.id);
-const todayStr = new Date().toISOString().split('T')[0];
+const todayStr = manilaDate();
 const setupStartDate = (!settings.startDate || settings.startDate === DEFAULT_SETTINGS.startDate) ? todayStr : settings.startDate;
 
 // Role-based redirect. The header's tour button sends every page here, so carry the request
@@ -35,33 +35,50 @@ const activePaySchedule = settings.isEmployee ? (settings.employeePaySchedule ||
 const activeCompany = settings.isEmployee ? (settings.employerCompany || settings.hostCompany) : settings.hostCompany;
 
 // Calculate Total Progress using the Unified Sync Engine
-const renderedHours = await getStudentProgress(user.id, user.email, activeStartDate, settings.isEmployee);
+let renderedHours = await getStudentProgress(user.id, user.email, activeStartDate, settings.isEmployee);
 
 // Everything that counts toward hours: synced Clockify sessions plus entries logged here.
 const allRawEntries = await getTrackedEntries(user.id, user.email, settings, activeStartDate);
+
+// A session that is still running lives in active_timers and only becomes an `entries` row on
+// time-out — so without this every figure below reads zero for today while you are clocked in.
+// Counted against its start date, the same day stopTimer will file it under.
+const liveTimer = await getActiveTimer(user.id, settings.isEmployee ?? false);
+if (liveTimer) {
+  const liveStart = new Date(liveTimer.startTime);
+  const liveSeconds = Math.max(0, Math.floor((Date.now() - liveStart.getTime()) / 1000));
+  allRawEntries.push({ date: manilaDate(liveStart), durationSeconds: liveSeconds });
+  renderedHours += liveSeconds / 3600;
+}
 
 // Weekly activity chart: hours per day for the last 7 calendar days (zero-filled)
 const dailyHoursMap: Record<string, number> = {};
 allRawEntries.forEach(e => {
   dailyHoursMap[e.date] = (dailyHoursMap[e.date] || 0) + e.durationSeconds / 3600;
 });
+const todayManila = manilaDate();
+// Anchored at UTC midnight of the Manila date, so day arithmetic stays on the same calendar days
+// the entry keys use.
+const manilaDayOffset = (n: number) => {
+  const d = new Date(`${todayManila}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d;
+};
 const weeklyChartData = Array.from({ length: 7 }, (_, i) => {
-  const d = new Date();
-  d.setDate(d.getDate() - (6 - i));
-  const dateStr = d.toISOString().split('T')[0];
+  const d = manilaDayOffset(i - 6);
   return {
-    label: d.toLocaleDateString('en-US', { weekday: 'short' }),
-    hours: dailyHoursMap[dateStr] || 0,
+    label: d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
+    hours: dailyHoursMap[d.toISOString().split('T')[0]] || 0,
   };
 });
 const maxDailyHours = Math.max(1, ...weeklyChartData.map(d => d.hours));
 
 // Weekly totals for the current month, in 7-day blocks from the 1st. Each row names the dates it
 // covers — "W3" on its own tells you nothing about which days are in it.
-const now = new Date();
-const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-const monthShort = now.toLocaleDateString('en-US', { month: 'short' });
-const todayDayOfMonth = Number(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }).slice(8, 10));
+const [todayYear, todayMonth] = todayManila.split('-').map(Number);
+const daysInMonth = new Date(Date.UTC(todayYear, todayMonth, 0)).getUTCDate();
+const monthShort = new Date(`${todayManila}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+const todayDayOfMonth = Number(todayManila.slice(8, 10));
 
 const monthWeeksData = Array.from({ length: Math.ceil(daysInMonth / 7) }, (_, i) => {
   const from = i * 7 + 1;
@@ -77,7 +94,7 @@ const monthWeeksData = Array.from({ length: Math.ceil(daysInMonth / 7) }, (_, i)
 });
 
 Object.entries(dailyHoursMap)
-  .filter(([d]) => d.startsWith(new Date().toISOString().slice(0, 7)))
+  .filter(([d]) => d.startsWith(todayManila.slice(0, 7)))
   .forEach(([d, h]) => {
     const week = monthWeeksData[Math.floor((Number(d.slice(8, 10)) - 1) / 7)];
     if (!week) return;
@@ -90,9 +107,7 @@ const bestDayHours = Math.max(0, ...Object.values(dailyHoursMap));
 
 let currentStreak = 0;
 for (let i = 0; i < 3650; i++) {
-  const d = new Date();
-  d.setDate(d.getDate() - i);
-  const dateStr = d.toISOString().split('T')[0];
+  const dateStr = manilaDayOffset(-i).toISOString().split('T')[0];
   if ((dailyHoursMap[dateStr] || 0) > 0) currentStreak++;
   else break;
 }
@@ -130,19 +145,19 @@ let longestStreak = 0;
 const daysSinceStart = Math.max(1, Math.ceil((new Date().getTime() - new Date(activeStartDate).getTime()) / 86400000));
 const avgHoursPerDayOverall = renderedHours / daysSinceStart;
 
-const currentMonthPrefix = new Date().toISOString().slice(0, 7);
+const currentMonthPrefix = todayManila.slice(0, 7);
 const hoursThisMonth = Object.entries(dailyHoursMap)
   .filter(([d]) => d.startsWith(currentMonthPrefix))
   .reduce((sum, [, h]) => sum + h, 0);
 
-// Cumulative hours trend: one point per calendar day from program start to today.
+// Cumulative hours trend: one point per week from program start to today. Daily points made a
+// months-long run unreadable; the running total is still summed day by day, only plotted weekly
+// (plus the first and last day, so a fresh account still gets a line).
 // Running total always starts from the true start date; the visible window is capped
 // (ponytail: defensive against a bad/very old start date, not a real-world case).
 const CHART_MAX_DAYS = 730;
-const chartToday = new Date();
-chartToday.setHours(0, 0, 0, 0);
-const chartTrueStart = new Date(activeStartDate);
-chartTrueStart.setHours(0, 0, 0, 0);
+const chartToday = new Date(`${todayManila}T00:00:00Z`);
+const chartTrueStart = new Date(`${activeStartDate}T00:00:00Z`);
 const chartTotalSpanDays = Math.max(1, Math.floor((chartToday.getTime() - chartTrueStart.getTime()) / 86400000) + 1);
 const chartDisplayFromIndex = Math.max(0, chartTotalSpanDays - CHART_MAX_DAYS);
 
@@ -154,14 +169,15 @@ const cumulativeSeries: { date: string; label: string; cumulative: number }[] = 
   while (cursor <= chartToday) {
     const dateStr = cursor.toISOString().split('T')[0];
     running += dailyHoursMap[dateStr] || 0;
-    if (dayIndex >= chartDisplayFromIndex) {
+    const isWeekMark = dayIndex === 0 || dayIndex % 7 === 6 || cursor.getTime() === chartToday.getTime();
+    if (dayIndex >= chartDisplayFromIndex && isWeekMark) {
       cumulativeSeries.push({
         date: dateStr,
-        label: cursor.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        label: cursor.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }),
         cumulative: running,
       });
     }
-    cursor.setDate(cursor.getDate() + 1);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
     dayIndex++;
   }
 }
@@ -808,7 +824,7 @@ if (!settings.isEmployee) {
               </div>
               <script type="application/json" id="progress-chart-data" is:inline set:html={JSON.stringify(chartPoints)} />
             ) : (
-              <p class="chart-empty">Keep logging — your progress trend shows up here after a couple of days.</p>
+              <p class="chart-empty">Keep logging — your weekly progress trend shows up here after a couple of days.</p>
             )}
           </section>
         </div>
@@ -862,7 +878,7 @@ if (!settings.isEmployee) {
     {
       target: '.progress-chart-card',
       title: 'Progress trend',
-      body: 'Your cumulative hours over time against the target line. Hover or drag across it to read any specific day.',
+      body: 'Your cumulative hours week by week against the target line. Hover or drag across it to read any point.',
     },
     {
       target: '#clock-toggle-wrap',

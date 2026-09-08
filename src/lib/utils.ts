@@ -27,3 +27,9 @@ export function formatDate(date: Date): string {
     timeZone: 'Asia/Manila'
   });
 }
+
+// Entry dates are Manila-local 'YYYY-MM-DD' strings. Anything comparing "today" against them has
+// to ask in Manila too — the server runs on UTC, so toISOString() is a day behind until 8am PHT.
+export function manilaDate(date: Date = new Date()): string {
+  return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+}
