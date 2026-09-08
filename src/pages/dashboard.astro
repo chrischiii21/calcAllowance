@@ -79,30 +79,40 @@ const liveStartedToday = !!liveTimer && manilaDate(new Date(liveTimer.startTime)
 const todayClosedSeconds = Math.max(0, todaySeconds - (liveStartedToday ? liveSeconds : 0));
 const todayEntryCount = allRawEntries.filter(e => e.date === todayManila).length - (liveStartedToday ? 1 : 0);
 
-// Weekly totals for the current month, in 7-day blocks from the 1st. Each row names the dates it
-// covers — "W3" on its own tells you nothing about which days are in it.
+// Weekly totals for the current month, in real Mon-Sun calendar weeks (clipped to the month at
+// both ends). Each row names the dates it covers — "W3" on its own tells you nothing about which
+// days are in it.
 const [todayYear, todayMonth] = todayManila.split('-').map(Number);
 const daysInMonth = new Date(Date.UTC(todayYear, todayMonth, 0)).getUTCDate();
 const monthShort = new Date(`${todayManila}T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
 const todayDayOfMonth = Number(todayManila.slice(8, 10));
 
-const monthWeeksData = Array.from({ length: Math.ceil(daysInMonth / 7) }, (_, i) => {
-  const from = i * 7 + 1;
-  const to = Math.min(i * 7 + 7, daysInMonth);
-  return {
-    label: `${monthShort} ${from}–${to}`,
-    from,
-    to,
-    isCurrent: todayDayOfMonth >= from && todayDayOfMonth <= to,
-    days: 0,
-    hours: 0,
-  };
-});
+const isoWeekday = (day: number) => {
+  const wd = new Date(Date.UTC(todayYear, todayMonth - 1, day)).getUTCDay();
+  return wd === 0 ? 7 : wd; // 1=Mon..7=Sun
+};
+
+const monthWeeksData: { label: string, from: number, to: number, isCurrent: boolean, days: number, hours: number }[] = [];
+let weekStart = 1;
+for (let day = 1; day <= daysInMonth; day++) {
+  if (isoWeekday(day) === 7 || day === daysInMonth) {
+    monthWeeksData.push({
+      label: `${monthShort} ${weekStart}–${day}`,
+      from: weekStart,
+      to: day,
+      isCurrent: todayDayOfMonth >= weekStart && todayDayOfMonth <= day,
+      days: 0,
+      hours: 0,
+    });
+    weekStart = day + 1;
+  }
+}
 
 Object.entries(dailyHoursMap)
   .filter(([d]) => d.startsWith(todayManila.slice(0, 7)))
   .forEach(([d, h]) => {
-    const week = monthWeeksData[Math.floor((Number(d.slice(8, 10)) - 1) / 7)];
+    const dayNum = Number(d.slice(8, 10));
+    const week = monthWeeksData.find(w => dayNum >= w.from && dayNum <= w.to);
     if (!week) return;
     week.hours += h;
     if (h > 0) week.days++;
