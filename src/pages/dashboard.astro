@@ -79,29 +79,34 @@ const liveStartedToday = !!liveTimer && manilaDate(new Date(liveTimer.startTime)
 const todayClosedSeconds = Math.max(0, todaySeconds - (liveStartedToday ? liveSeconds : 0));
 const todayEntryCount = allRawEntries.filter(e => e.date === todayManila).length - (liveStartedToday ? 1 : 0);
 
-// Weekly totals for the last few real Mon-Sun calendar weeks — a week counts as one block even
-// when it straddles a month boundary, instead of getting cut off and restarted at the 1st.
+// Weekly totals for real Mon-Sun calendar weeks that overlap the current month — a week counts as
+// one block even when it straddles the month boundary, instead of getting cut off at the 1st.
 const isoWeekdayOf = (dateStr: string) => {
   const wd = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
   return wd === 0 ? 7 : wd; // 1=Mon..7=Sun
 };
 const shortDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
-const WEEKS_SHOWN = 5;
 const mondayThisWeek = manilaDayOffset(-(isoWeekdayOf(todayManila) - 1));
+const monthStartStr = `${todayManila.slice(0, 7)}-01`;
+const mondayOfMonthStart = (() => {
+  const d = new Date(`${monthStartStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - (isoWeekdayOf(monthStartStr) - 1));
+  return d;
+})();
+const weeksCount = Math.round((mondayThisWeek.getTime() - mondayOfMonthStart.getTime()) / (7 * 86400000)) + 1;
 
 const monthWeeksData: { label: string, from: string, to: string, isCurrent: boolean, days: number, hours: number }[] =
-  Array.from({ length: WEEKS_SHOWN }, (_, i) => {
-    const weeksBack = WEEKS_SHOWN - 1 - i;
-    const start = new Date(mondayThisWeek);
-    start.setUTCDate(start.getUTCDate() - weeksBack * 7);
+  Array.from({ length: weeksCount }, (_, i) => {
+    const start = new Date(mondayOfMonthStart);
+    start.setUTCDate(start.getUTCDate() + i * 7);
     const end = new Date(start);
     end.setUTCDate(end.getUTCDate() + 6);
     return {
       label: `${shortDate(start)} – ${shortDate(end)}`,
       from: start.toISOString().split('T')[0],
       to: end.toISOString().split('T')[0],
-      isCurrent: weeksBack === 0,
+      isCurrent: i === weeksCount - 1,
       days: 0,
       hours: 0,
     };
