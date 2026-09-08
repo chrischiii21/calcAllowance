@@ -44,9 +44,10 @@ const allRawEntries = await getTrackedEntries(user.id, user.email, settings, act
 // time-out — so without this every figure below reads zero for today while you are clocked in.
 // Counted against its start date, the same day stopTimer will file it under.
 const liveTimer = await getActiveTimer(user.id, settings.isEmployee ?? false);
+let liveSeconds = 0;
 if (liveTimer) {
   const liveStart = new Date(liveTimer.startTime);
-  const liveSeconds = Math.max(0, Math.floor((Date.now() - liveStart.getTime()) / 1000));
+  liveSeconds = Math.max(0, Math.floor((Date.now() - liveStart.getTime()) / 1000));
   allRawEntries.push({ date: manilaDate(liveStart), durationSeconds: liveSeconds });
   renderedHours += liveSeconds / 3600;
 }
@@ -72,6 +73,15 @@ const weeklyChartData = Array.from({ length: 7 }, (_, i) => {
   };
 });
 const maxDailyHours = Math.max(1, ...weeklyChartData.map(d => d.hours));
+
+// Today's running total: everything already closed today plus the session still ticking. The
+// closed part is what the client ticker counts up from, so it never double-counts the live one.
+const todaySeconds = Math.round((dailyHoursMap[todayManila] || 0) * 3600);
+// A timer started before midnight belongs to yesterday (that is the day stopTimer files it under),
+// so it neither ticks here nor gets subtracted from today's base.
+const liveStartedToday = !!liveTimer && manilaDate(new Date(liveTimer.startTime)) === todayManila;
+const todayClosedSeconds = Math.max(0, todaySeconds - (liveStartedToday ? liveSeconds : 0));
+const todayEntryCount = allRawEntries.filter(e => e.date === todayManila).length - (liveStartedToday ? 1 : 0);
 
 // Weekly totals for the current month, in 7-day blocks from the 1st. Each row names the dates it
 // covers — "W3" on its own tells you nothing about which days are in it.
@@ -150,37 +160,29 @@ const hoursThisMonth = Object.entries(dailyHoursMap)
   .filter(([d]) => d.startsWith(currentMonthPrefix))
   .reduce((sum, [, h]) => sum + h, 0);
 
-// Cumulative hours trend: one point per week from program start to today. Daily points made a
-// months-long run unreadable; the running total is still summed day by day, only plotted weekly
-// (plus the first and last day, so a fresh account still gets a line).
-// Running total always starts from the true start date; the visible window is capped
-// (ponytail: defensive against a bad/very old start date, not a real-world case).
-const CHART_MAX_DAYS = 730;
+// Hours per week from program start to today — the total logged inside each week, not a running
+// total, so a slow week reads as a dip instead of a flatter climb. Weeks are 7-day blocks from the
+// start date; the last one is short whenever today lands mid-week.
+// (ponytail: window capped defensively against a bad/very old start date, not a real-world case.)
+const CHART_MAX_WEEKS = 104;
 const chartToday = new Date(`${todayManila}T00:00:00Z`);
 const chartTrueStart = new Date(`${activeStartDate}T00:00:00Z`);
 const chartTotalSpanDays = Math.max(1, Math.floor((chartToday.getTime() - chartTrueStart.getTime()) / 86400000) + 1);
-const chartDisplayFromIndex = Math.max(0, chartTotalSpanDays - CHART_MAX_DAYS);
 
-const cumulativeSeries: { date: string; label: string; cumulative: number }[] = [];
-{
-  let running = 0;
-  const cursor = new Date(chartTrueStart);
-  let dayIndex = 0;
-  while (cursor <= chartToday) {
-    const dateStr = cursor.toISOString().split('T')[0];
-    running += dailyHoursMap[dateStr] || 0;
-    const isWeekMark = dayIndex === 0 || dayIndex % 7 === 6 || cursor.getTime() === chartToday.getTime();
-    if (dayIndex >= chartDisplayFromIndex && isWeekMark) {
-      cumulativeSeries.push({
-        date: dateStr,
-        label: cursor.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }),
-        cumulative: running,
-      });
-    }
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-    dayIndex++;
+const chartDayLabel = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const weekSeries = Array.from({ length: Math.ceil(chartTotalSpanDays / 7) }, (_, w) => {
+  const start = new Date(chartTrueStart);
+  start.setUTCDate(start.getUTCDate() + w * 7);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+  if (end > chartToday) end.setTime(chartToday.getTime());
+
+  let hours = 0;
+  for (let c = new Date(start); c <= end; c.setUTCDate(c.getUTCDate() + 1)) {
+    hours += dailyHoursMap[c.toISOString().split('T')[0]] || 0;
   }
-}
+  return { date: end.toISOString().split('T')[0], label: `${chartDayLabel(start)} – ${chartDayLabel(end)}`, hours };
+}).slice(-CHART_MAX_WEEKS);
 
 const CHART_W = 720;
 const CHART_H = 220;
@@ -188,20 +190,22 @@ const CHART_PAD = { top: 16, right: 16, bottom: 26, left: 46 };
 const chartPlotW = CHART_W - CHART_PAD.left - CHART_PAD.right;
 const chartPlotH = CHART_H - CHART_PAD.top - CHART_PAD.bottom;
 
-const hasTargetLine = !settings.isEmployee && settings.targetHours > 0;
-const cumulativeMax = cumulativeSeries.length > 0 ? cumulativeSeries[cumulativeSeries.length - 1].cumulative : 0;
-const chartMaxY = (Math.max(cumulativeMax, hasTargetLine ? settings.targetHours : 0) * 1.1) || 1;
+// The cumulative target line went with the cumulative series — a 486h goal drawn against ~40h
+// weeks would flatten the whole chart. Progress against target still lives in the cards above.
+const weekMaxHours = Math.max(0, ...weekSeries.map(w => w.hours));
+const chartMaxY = (weekMaxHours * 1.15) || 1;
 
-const chartX = (i: number) => cumulativeSeries.length > 1 ? CHART_PAD.left + (i / (cumulativeSeries.length - 1)) * chartPlotW : CHART_PAD.left + chartPlotW / 2;
+const chartX = (i: number) => weekSeries.length > 1 ? CHART_PAD.left + (i / (weekSeries.length - 1)) * chartPlotW : CHART_PAD.left + chartPlotW / 2;
 const chartY = (v: number) => CHART_PAD.top + (1 - v / chartMaxY) * chartPlotH;
 
-const chartPoints = cumulativeSeries.map((d, i) => ({ x: chartX(i), y: chartY(d.cumulative), date: d.label, cumulative: d.cumulative.toFixed(1) }));
+const chartPoints = weekSeries.map((d, i) => ({ x: chartX(i), y: chartY(d.hours), date: d.label, hours: d.hours.toFixed(1) }));
 const linePath = chartPoints.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
 const areaPath = chartPoints.length > 0
-  ? `${chartX(0).toFixed(1)},${chartY(0).toFixed(1)} ${linePath} ${chartX(cumulativeSeries.length - 1).toFixed(1)},${chartY(0).toFixed(1)}`
+  ? `${chartX(0).toFixed(1)},${chartY(0).toFixed(1)} ${linePath} ${chartX(weekSeries.length - 1).toFixed(1)},${chartY(0).toFixed(1)}`
   : '';
 const chartYTicks = [0, chartMaxY / 2, chartMaxY];
-const chartTargetY = hasTargetLine ? chartY(settings.targetHours) : 0;
+const avgWeekHours = weekSeries.reduce((sum, w) => sum + w.hours, 0) / (weekSeries.length || 1);
+const chartAvgY = chartY(avgWeekHours);
 const chartLastPoint = chartPoints[chartPoints.length - 1];
 
 const progressPercent = settings.isEmployee ? 0 : Math.min(100, (renderedHours / (settings.targetHours || 1)) * 100);
@@ -554,7 +558,7 @@ if (!settings.isEmployee) {
           </div>
           <div class="header-date">
             <span class="date-label">TODAY</span>
-            <span class="date-value">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+            <span class="date-value">{new Date(`${todayManila}T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}</span>
           </div>
         </div>
 
@@ -691,6 +695,41 @@ if (!settings.isEmployee) {
         <div class="quick-stats">
           <div class="stat-tile">
             <div class="stat-head">
+              <span class="stat-label">Today</span>
+              <span
+                class="stat-value"
+                id="today-total"
+                data-closed={todayClosedSeconds}
+                data-live-start={liveStartedToday ? liveTimer!.startTime : ''}
+              >{formatHMS(todaySeconds)}</span>
+            </div>
+            <p class="stat-explain">
+              {liveStartedToday
+                ? `Counting up live — ${todayEntryCount} closed ${todayEntryCount === 1 ? 'entry' : 'entries'} today plus the session running now.`
+                : `${todayEntryCount} ${todayEntryCount === 1 ? 'entry' : 'entries'} logged today. Time In from the header to start counting.`}
+            </p>
+          </div>
+          <script is:inline>
+            // Keeps the Today tile ticking while a session is open. Time In/Out reloads the page,
+            // so the closed base below is never stale.
+            {
+              const el = document.getElementById('today-total');
+              const startedAt = el && el.dataset.liveStart ? new Date(el.dataset.liveStart).getTime() : null;
+              if (startedAt) {
+                const closed = Number(el.dataset.closed) || 0;
+                const pad = (n) => String(n).padStart(2, '0');
+                const tick = () => {
+                  const t = closed + Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+                  el.textContent = `${pad(Math.floor(t / 3600))}:${pad(Math.floor((t % 3600) / 60))}:${pad(t % 60)}`;
+                };
+                tick();
+                setInterval(tick, 1000);
+              }
+            }
+          </script>
+
+          <div class="stat-tile">
+            <div class="stat-head">
               <span class="stat-label">Last 7 Days</span>
               <span class="stat-value">{formatHours(totalWeekHours)}</span>
             </div>
@@ -777,8 +816,8 @@ if (!settings.isEmployee) {
             <div class="section-header">
               <h2>Progress <span class="accent">Trend</span></h2>
               <div class="chart-legend">
-                <span class="legend-item"><span class="legend-swatch line"></span>Hours Logged</span>
-                {hasTargetLine && <span class="legend-item"><span class="legend-swatch target"></span>Target</span>}
+                <span class="legend-item"><span class="legend-swatch line"></span>Hours / Week</span>
+                <span class="legend-item"><span class="legend-swatch target"></span>Avg {avgWeekHours.toFixed(1)}h</span>
               </div>
             </div>
 
@@ -799,20 +838,18 @@ if (!settings.isEmployee) {
                     </>
                   ))}
 
-                  {hasTargetLine && (
-                    <line class="chart-target-line" x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={chartTargetY} y2={chartTargetY} />
-                  )}
+                  <line class="chart-target-line" x1={CHART_PAD.left} x2={CHART_W - CHART_PAD.right} y1={chartAvgY} y2={chartAvgY} />
 
                   <polygon class="chart-area" points={areaPath} />
                   <polyline class="chart-line" points={linePath} />
 
                   {chartLastPoint && <circle class="chart-end-dot" cx={chartLastPoint.x} cy={chartLastPoint.y} r="4.5" />}
                   {chartLastPoint && (
-                    <text class="chart-end-label" x={chartLastPoint.x} y={chartLastPoint.y - 10} text-anchor="end">{chartLastPoint.cumulative}h</text>
+                    <text class="chart-end-label" x={chartLastPoint.x} y={chartLastPoint.y - 10} text-anchor="end">{chartLastPoint.hours}h</text>
                   )}
 
-                  <text class="chart-axis-label" x={CHART_PAD.left} y={CHART_H - 6} text-anchor="start">{cumulativeSeries[0].label}</text>
-                  <text class="chart-axis-label" x={CHART_W - CHART_PAD.right} y={CHART_H - 6} text-anchor="end">{cumulativeSeries[cumulativeSeries.length - 1].label}</text>
+                  <text class="chart-axis-label" x={CHART_PAD.left} y={CHART_H - 6} text-anchor="start">{weekSeries[0].label}</text>
+                  <text class="chart-axis-label" x={CHART_W - CHART_PAD.right} y={CHART_H - 6} text-anchor="end">{weekSeries[weekSeries.length - 1].label}</text>
 
                   <line id="progress-chart-crosshair" class="chart-crosshair" x1="0" x2="0" y1={CHART_PAD.top} y2={CHART_H - CHART_PAD.bottom} />
                   <circle id="progress-chart-hover-dot" class="chart-hover-dot" r="5" />
@@ -824,7 +861,7 @@ if (!settings.isEmployee) {
               </div>
               <script type="application/json" id="progress-chart-data" is:inline set:html={JSON.stringify(chartPoints)} />
             ) : (
-              <p class="chart-empty">Keep logging — your weekly progress trend shows up here after a couple of days.</p>
+              <p class="chart-empty">Keep logging — your weekly trend shows up here once you have a second week.</p>
             )}
           </section>
         </div>
@@ -878,7 +915,7 @@ if (!settings.isEmployee) {
     {
       target: '.progress-chart-card',
       title: 'Progress trend',
-      body: 'Your cumulative hours week by week against the target line. Hover or drag across it to read any point.',
+      body: 'Hours logged in each week against your average week — a light week dips instead of just flattening. Hover or drag across it to read any week.',
     },
     {
       target: '#clock-toggle-wrap',
@@ -1207,7 +1244,7 @@ if (!settings.isEmployee) {
       dot.setAttribute('cy', p.y);
       dot.style.opacity = '1';
 
-      tooltip.querySelector('.tt-value').textContent = `${p.cumulative}h`;
+      tooltip.querySelector('.tt-value').textContent = `${p.hours}h`;
       tooltip.querySelector('.tt-date').textContent = p.date;
       tooltip.style.opacity = '1';
 
