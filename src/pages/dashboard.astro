@@ -52,7 +52,6 @@ if (liveTimer) {
   renderedHours += liveSeconds / 3600;
 }
 
-// Weekly activity chart: hours per day for the last 7 calendar days (zero-filled)
 const dailyHoursMap: Record<string, number> = {};
 allRawEntries.forEach(e => {
   dailyHoursMap[e.date] = (dailyHoursMap[e.date] || 0) + e.durationSeconds / 3600;
@@ -65,14 +64,11 @@ const manilaDayOffset = (n: number) => {
   d.setUTCDate(d.getUTCDate() + n);
   return d;
 };
-const weeklyChartData = Array.from({ length: 7 }, (_, i) => {
-  const d = manilaDayOffset(i - 6);
-  return {
-    label: d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
-    hours: dailyHoursMap[d.toISOString().split('T')[0]] || 0,
-  };
-});
-const maxDailyHours = Math.max(1, ...weeklyChartData.map(d => d.hours));
+// Rolling 7-day total, kept only for the recent-pace badge — the tile that used to show it was
+// redundant with the Weekly Activity card below.
+const totalWeekHours = Array.from({ length: 7 }, (_, i) =>
+  dailyHoursMap[manilaDayOffset(-i).toISOString().split('T')[0]] || 0
+).reduce((sum, h) => sum + h, 0);
 
 // Today's running total: everything already closed today plus the session still ticking. The
 // closed part is what the client ticker counts up from, so it never double-counts the live one.
@@ -112,7 +108,6 @@ Object.entries(dailyHoursMap)
     if (h > 0) week.days++;
   });
 const maxWeekHours = Math.max(1, ...monthWeeksData.map(w => w.hours));
-const totalWeekHours = weeklyChartData.reduce((sum, d) => sum + d.hours, 0);
 const bestDayHours = Math.max(0, ...Object.values(dailyHoursMap));
 
 let currentStreak = 0;
@@ -730,16 +725,6 @@ if (!settings.isEmployee) {
 
           <div class="stat-tile">
             <div class="stat-head">
-              <span class="stat-label">Last 7 Days</span>
-              <span class="stat-value">{formatHours(totalWeekHours)}</span>
-            </div>
-            <p class="stat-explain">
-              A rolling window ending today — logged on {weeklyChartData.filter(d => d.hours > 0).length} of those 7 days, averaging {(totalWeekHours / 7).toFixed(1)}h/day. The chart below splits the month into fixed weeks instead.
-            </p>
-          </div>
-
-          <div class="stat-tile">
-            <div class="stat-head">
               <span class="stat-label">Streak</span>
               <span class="stat-value">{currentStreak} {currentStreak === 1 ? 'day' : 'days'}</span>
             </div>
@@ -905,7 +890,7 @@ if (!settings.isEmployee) {
     {
       target: '.quick-stats',
       title: 'Quick stats',
-      body: 'Your week, streaks, total logs and expected earnings — each tile spells out how its number was worked out, so nothing here is a black box.',
+      body: 'The running total for today, streaks, total logs and expected earnings — each tile spells out how its number was worked out, so nothing here is a black box.',
     },
     {
       target: '.weekly-chart-card',
