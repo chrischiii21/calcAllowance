@@ -87,14 +87,24 @@ const isoWeekdayOf = (dateStr: string) => {
 };
 const shortDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
-const mondayThisWeek = manilaDayOffset(-(isoWeekdayOf(todayManila) - 1));
+const mondayThisWeekStr = manilaDayOffset(-(isoWeekdayOf(todayManila) - 1)).toISOString().split('T')[0];
 const monthStartStr = `${todayManila.slice(0, 7)}-01`;
 const mondayOfMonthStart = (() => {
   const d = new Date(`${monthStartStr}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - (isoWeekdayOf(monthStartStr) - 1));
   return d;
 })();
-const weeksCount = Math.round((mondayThisWeek.getTime() - mondayOfMonthStart.getTime()) / (7 * 86400000)) + 1;
+const [todayYearNum, todayMonthNum] = todayManila.split('-').map(Number);
+const daysInMonth = new Date(Date.UTC(todayYearNum, todayMonthNum, 0)).getUTCDate();
+const monthEndStr = `${todayManila.slice(0, 7)}-${String(daysInMonth).padStart(2, '0')}`;
+const mondayOfMonthEnd = (() => {
+  const d = new Date(`${monthEndStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - (isoWeekdayOf(monthEndStr) - 1));
+  return d;
+})();
+// Full month up front, so a week that hasn't happened yet shows as an empty row instead of not
+// existing at all.
+const weeksCount = Math.round((mondayOfMonthEnd.getTime() - mondayOfMonthStart.getTime()) / (7 * 86400000)) + 1;
 
 const monthWeeksData: { label: string, from: string, to: string, isCurrent: boolean, days: number, hours: number }[] =
   Array.from({ length: weeksCount }, (_, i) => {
@@ -102,11 +112,12 @@ const monthWeeksData: { label: string, from: string, to: string, isCurrent: bool
     start.setUTCDate(start.getUTCDate() + i * 7);
     const end = new Date(start);
     end.setUTCDate(end.getUTCDate() + 6);
+    const from = start.toISOString().split('T')[0];
     return {
       label: `${shortDate(start)} – ${shortDate(end)}`,
-      from: start.toISOString().split('T')[0],
+      from,
       to: end.toISOString().split('T')[0],
-      isCurrent: i === weeksCount - 1,
+      isCurrent: from === mondayThisWeekStr,
       days: 0,
       hours: 0,
     };
@@ -1495,7 +1506,7 @@ if (!settings.isEmployee) {
   /* Horizontal week rows: each names the dates it covers, so "which days is this?" never comes up. */
   .week-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
   .week-row { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 14px; }
-  .week-range { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+  .week-range { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
   .week-row.current .week-range { color: var(--text-primary); }
   .week-now {
     font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
